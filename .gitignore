@@ -1,0 +1,19 @@
+# 환경 변수 (API 키 포함)
+.env
+
+# 데이터 (스냅샷, AI 모델, DB 등 대용량)
+data/
+
+# Claude Code 내부 파일
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

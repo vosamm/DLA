@@ -1,0 +1,58 @@
+services:
+  changedetection:
+    image: ghcr.io/dgtlmoon/changedetection.io
+    container_name: changedetection
+    volumes:
+      - ./data/changedetection:/datastore
+    ports:
+      - "5000:5000"
+    environment:
+      - API_KEY=${CHANGEDETECTION_API_KEY:-localkey123}
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    volumes:
+      - ./data/ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  ollama-init:
+    image: ollama/ollama
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["ollama", "pull", "gemma4:e2b"]
+
+  app:
+    build: ./app
+    container_name: visualmonitor-app
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=gemma4:e2b
+      - CHANGEDETECTION_URL=http://changedetection:5000
+      - CHANGEDETECTION_API_KEY=${CHANGEDETECTION_API_KEY:-localkey123}
+      - POLL_INTERVAL=${POLL_INTERVAL:-60}
+    volumes:
+      - ./app:/app
+      - ./data/app:/app/data
+    depends_on:
+      ollama:
+        condition: service_healthy
+      changedetection:
+        condition: service_started
+    restart: unless-stopped
