@@ -28,7 +28,7 @@ ollama (gemma4:e2b) →  로컬 멀티모달 AI 분석 엔진
 docker compose up -d
 ```
 
-처음 실행 시 `ollama-init` 컨테이너가 `gemma4:e2b` 모델을 자동 다운로드합니다 (수 분 소요).
+처음 실행 시 `ollama-init` 컨테이너가 `gemma4:e2b` 모델을 자동 다운로드합니다.
 
 ### 2. API 토큰 설정
 
@@ -43,7 +43,7 @@ cat data/changedetection/changedetection.json | python3 -c "import sys,json; d=j
 
 ```env
 CHANGEDETECTION_API_KEY=<위에서 확인한 토큰>
-POLL_INTERVAL=20
+POLL_INTERVAL=30
 ```
 
 설정 후 재시작:
@@ -61,8 +61,6 @@ docker compose down && docker compose up -d
 # 코드 변경 후 재빌드
 docker compose down && docker compose up -d --build
 ```
-
-> `docker compose down -v`는 볼륨까지 삭제되므로 주의하세요.
 
 ---
 
@@ -83,12 +81,11 @@ http://localhost:8000 메인 화면
 - **전체** 탭: 모든 사이트의 알림을 최신순으로 표시, 카드 내 사이트명 레이블 포함
 - **사이트별 탭**: 등록한 모니터 이름으로 탭이 자동 생성, 해당 사이트 알림만 표시
 - 알림 카드의 사이트명 또는 URL을 클릭하면 해당 페이지로 이동
-- AI 요약 내 URL도 클릭 가능
 
 ### AI 분석 동작 방식
 
 1. changedetection이 페이지 변경 감지 (5분 주기)
-2. 앱이 20초마다 폴링해서 신규 변경 확인
+2. 앱이 30초마다 폴링해서 신규 변경 확인
 3. **단순 숫자 변화(조회수, 건수 등)는 자동 무시**
 4. 실제 변경이면 페이지 스크린샷 + 텍스트 diff를 Ollama에 전달
 5. gemma4:e2b가 텍스트와 이미지를 함께 분석해 한국어 요약 생성
@@ -100,7 +97,7 @@ http://localhost:8000 메인 화면
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `CHANGEDETECTION_API_KEY` | changedetection.io API 토큰 | `localkey123` |
-| `POLL_INTERVAL` | 앱의 changedetection 폴링 주기 (초) | `60` |
+| `POLL_INTERVAL` | 앱의 changedetection 폴링 주기 (초) | `30` |
 
 changedetection의 실제 웹사이트 체크 주기는 기본 **5분**이며, URL 등록 시 자동 설정됩니다.
 
