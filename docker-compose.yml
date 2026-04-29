@@ -1,4 +1,14 @@
 services:
+  playwright-chrome:
+    image: dgtlmoon/sockpuppetbrowser:latest
+    container_name: browser-chrome
+    cap_add:
+      - SYS_ADMIN
+    restart: unless-stopped
+    environment:
+      - SCREEN_WIDTH=1920
+      - SCREEN_HEIGHT=1080
+
   changedetection:
     image: ghcr.io/dgtlmoon/changedetection.io
     container_name: changedetection
@@ -8,6 +18,9 @@ services:
       - "5000:5000"
     environment:
       - API_KEY=${CHANGEDETECTION_API_KEY:-localkey123}
+      - PLAYWRIGHT_DRIVER_URL=ws://playwright-chrome:3000/?stealth=1&--disable-web-security=true
+    depends_on:
+      - playwright-chrome
     restart: unless-stopped
 
   ollama:

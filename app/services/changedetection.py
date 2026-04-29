@@ -64,6 +64,7 @@ class ChangeDetectionClient:
                         "weeks": None, "days": None, "hours": None,
                         "minutes": 5, "seconds": None,
                     },
+                    "fetch_backend": "html_webdriver",
                 },
             )
             resp.raise_for_status()
