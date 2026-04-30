@@ -1,11 +1,12 @@
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from config import settings
 
 
 @contextmanager
-def get_db():
+def get_db() -> Generator[sqlite3.Connection, None, None]:
     db_path = Path(settings.database_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))

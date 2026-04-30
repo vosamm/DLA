@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from database import init_db
 from routers import alerts, watches
 from scheduler import poll_changes, start_scheduler
+from services.changedetection import changedetection
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,9 +23,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting VisualMonitor...")
     init_db()
-    await asyncio.sleep(5)  # wait for dependent services
-    await poll_changes()
+    try:
+        n = await changedetection.migrate_to_playwright()
+        if n:
+            logger.info(f"Migrated {n} watches to Playwright fetcher")
+    except Exception as e:
+        logger.warning(f"Playwright migration skipped: {e}")
     scheduler = start_scheduler()
+    asyncio.create_task(poll_changes())
     logger.info("VisualMonitor running.")
     yield
     scheduler.shutdown()

@@ -1,4 +1,3 @@
-import difflib
 import json
 import logging
 import re
@@ -11,37 +10,6 @@ from services.changedetection import changedetection
 from services.ollama import ollama
 
 logger = logging.getLogger(__name__)
-
-
-def determine_type(title: str, tags) -> str:
-    return "content"
-
-
-def is_trivial_change(diff_text: str) -> bool:
-    """변경된 내용이 숫자(조회수·건수 등)만 바뀐 경우 True 반환."""
-    added = [
-        line[1:]
-        for line in diff_text.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    ]
-    removed = [
-        line[1:]
-        for line in diff_text.splitlines()
-        if line.startswith("-") and not line.startswith("---")
-    ]
-
-    if not added and not removed:
-        return True
-
-    # 숫자를 모두 제거했을 때 추가·삭제 내용이 동일하면 숫자만 바뀐 것
-    def strip_nums(lines):
-        return [re.sub(r"[\d,]+", "", l).strip() for l in lines]
-
-    if strip_nums(added) == strip_nums(removed):
-        logger.info("Trivial numeric change detected, skipping.")
-        return True
-
-    return False
 
 
 # ── DB 헬퍼 ───────────────────────────────────────────────────────────────────
@@ -95,6 +63,73 @@ def db_save_alert(
         )
 
 
+# ── 파이프라인 헬퍼 ───────────────────────────────────────────────────────────
+def extract_diff_lines(previous: str, current: str) -> tuple[list[str], list[str]]:
+    import difflib
+    skip = settings.ignore_top_lines
+    diff = difflib.unified_diff(
+        previous.splitlines()[skip:],
+        current.splitlines()[skip:],
+        lineterm="",
+        n=0,
+    )
+    new_lines, removed_lines = [], []
+    for line in diff:
+        if line.startswith("+") and not line.startswith("+++"):
+            text = line[1:].strip()
+            if text:
+                new_lines.append(text)
+        elif line.startswith("-") and not line.startswith("---"):
+            text = line[1:].strip()
+            if text:
+                removed_lines.append(text)
+    return new_lines, removed_lines
+
+
+def is_trivial_change(new_lines: list[str], removed_lines: list[str]) -> bool:
+    """숫자만 바뀐 경우, 또는 커뮤니티 점수·조회수 패턴이면 True."""
+    if not new_lines and not removed_lines:
+        return True
+
+    # 커뮤니티 점수/조회수 패턴 (예: "2 points by tls60112", "조회 123", "추천 5")
+    TRIVIAL_LINE_PATTERNS = [
+        re.compile(r'^\d+\s+points?\s+by\s+\S+$', re.IGNORECASE),  # "N points by username"
+        re.compile(r'^조회\s*\d+'),
+        re.compile(r'^추천\s*\d+'),
+        re.compile(r'^(hit|view|click)s?\s*:?\s*\d+', re.IGNORECASE),
+    ]
+
+    def is_trivial_line(line: str) -> bool:
+        return any(p.search(line) for p in TRIVIAL_LINE_PATTERNS)
+
+    # 새 줄이 모두 trivial 패턴이면 스킵
+    if new_lines and all(is_trivial_line(l) for l in new_lines):
+        return True
+
+    def strip_nums(lines: list[str]) -> list[str]:
+        return [re.sub(r"[\d,]+", "", l).strip() for l in lines]
+
+    stripped_new = strip_nums(new_lines)
+    stripped_removed = strip_nums(removed_lines)
+    return stripped_new == stripped_removed and any(s for s in stripped_new)
+
+
+# 상업성 키워드 (광고/스팸 사전 필터)
+_AD_KEYWORDS = [
+    "공장직영", "후불결제", "후불 결제", "사은품증정", "사은품 증정",
+    "24시간배송", "24시간 배송", "페카매입", "당일배송", "무료배송",
+    "공장가", "도매가", "특가판매", "할인쿠폰", "최저가보장",
+    "구매문의", "판매문의", "재고문의", "A/S문의",
+]
+
+
+def is_commercial_spam(new_lines: list[str]) -> bool:
+    """상업성 키워드가 2개 이상 포함된 경우 광고/스팸으로 판단."""
+    combined = " ".join(new_lines)
+    hit_count = sum(1 for kw in _AD_KEYWORDS if kw in combined)
+    return hit_count >= 2
+
+
 # ── 변경 처리 ─────────────────────────────────────────────────────────────────
 async def process_watch(uuid: str, url: str, title: str, type_: str, last_changed: int):
     try:
@@ -104,32 +139,58 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
         if not timestamps:
             return
 
-        current = await changedetection.get_snapshot(uuid, timestamps[-1])
+        current_ts = timestamps[-1]
+        current_text = await changedetection.get_snapshot(uuid, current_ts)
 
         if len(timestamps) >= 2:
-            previous = await changedetection.get_snapshot(uuid, timestamps[-2])
-            diff_lines = list(
-                difflib.unified_diff(
-                    previous.splitlines(),
-                    current.splitlines(),
-                    lineterm="",
-                    n=2,
-                )
-            )
-            diff_text = "\n".join(diff_lines[:200])
+            previous_text = await changedetection.get_snapshot(uuid, timestamps[-2])
+            new_lines, removed_lines = extract_diff_lines(previous_text, current_text)
         else:
-            diff_text = current[:2000]
+            new_lines = [l.strip() for l in current_text.splitlines()[settings.ignore_top_lines:] if l.strip()][:30]
+            removed_lines = []
 
-        if not diff_text.strip() or is_trivial_change(diff_text):
+        if not new_lines:
             db_mark_processed(uuid, last_changed)
             return
 
-        logger.info(f"[{type_.upper()}] Analyzing change: {url}")
-        image_bytes = await changedetection.get_screenshot(uuid)
-        analysis = await ollama.analyze(url, title, diff_text, image_bytes=image_bytes)
-        db_save_alert(uuid, url, type_, analysis, diff_text, last_changed)
+        if is_trivial_change(new_lines, removed_lines):
+            logger.info(f"Trivial change (numbers only), skipping: {url}")
+            db_mark_processed(uuid, last_changed)
+            return
+
+        # LLM 분석: market 타입은 Vision, content 타입은 텍스트
+        if type_ == "market":
+            screenshot = await changedetection.get_screenshot(uuid)
+            result = await ollama.analyze_market(new_lines, screenshot)
+        else:
+            if is_commercial_spam(new_lines):
+                logger.info(f"Commercial spam detected, skipping: {url}")
+                db_mark_processed(uuid, last_changed)
+                return
+            result = await ollama.analyze(new_lines)
+
+        found_title = result.get("title", "")
+        summary = result.get("summary", "")
+
+        if not found_title:
+            db_mark_processed(uuid, last_changed)
+            return
+
+        # 동일 제목 중복 방지
+        with get_db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
+                (uuid, found_title),
+            ).fetchone()
+        if exists:
+            logger.info(f"Duplicate alert skipped: [{found_title}]")
+            db_mark_processed(uuid, last_changed)
+            return
+
+        analysis = {"title": found_title, "summary": summary}
+        db_save_alert(uuid, url, type_, analysis, "\n".join(new_lines), last_changed)
         db_mark_processed(uuid, last_changed)
-        logger.info(f"Alert saved for: {url}")
+        logger.info(f"Alert saved: [{found_title}] {url}")
 
     except Exception as e:
         logger.error(f"Error processing watch {uuid} ({url}): {e}")
@@ -144,12 +205,17 @@ async def poll_changes():
         logger.warning(f"Could not reach changedetection.io: {e}")
         return
 
+    with get_db() as conn:
+        saved_types = {
+            r["uuid"]: r["type"]
+            for r in conn.execute("SELECT uuid, type FROM watches").fetchall()
+        }
+
     for uuid, data in watches.items():
         url = data.get("url", "")
         title = data.get("title", "")
-        tags = data.get("tags", [])
         last_changed = data.get("last_changed") or 0
-        type_ = determine_type(title, tags)
+        type_ = saved_types.get(uuid) or "content"
 
         db_upsert_watch(uuid, url, title, type_, last_changed)
 

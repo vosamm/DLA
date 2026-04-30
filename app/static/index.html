@@ -103,6 +103,20 @@
 
     .alert-card:hover { border-color: #c4b5fd; }
 
+    .dismiss-btn {
+      background: none;
+      border: none;
+      color: #cbd5e1;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 0 0 8px;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+
+    .dismiss-btn:hover { color: #94a3b8; }
+
     .alert-card .top {
       display: flex;
       align-items: center;
@@ -154,12 +168,21 @@
 
     .alert-card .time { font-size: 12px; color: #94a3b8; }
 
+    .alert-card .alert-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1e293b;
+      line-height: 1.5;
+      margin-bottom: 6px;
+    }
+
     .alert-card .summary {
       font-size: 14px;
       color: #475569;
       line-height: 1.6;
       margin-bottom: 10px;
     }
+
 
     .summary-link {
       color: #2563eb;
@@ -367,10 +390,6 @@
     <div class="label">전체 알림</div>
     <div class="value" id="stat-total">-</div>
   </div>
-  <div class="stat-card content">
-    <div class="label">콘텐츠 알림</div>
-    <div class="value" id="stat-content">-</div>
-  </div>
   <div class="stat-card watches">
     <div class="label">모니터 수</div>
     <div class="value" id="stat-watches">-</div>
@@ -496,8 +515,6 @@
     try {
       const res = await fetch('/api/alerts/stats');
       const data = await res.json();
-      document.getElementById('stat-total').textContent = data.total_alerts;
-      document.getElementById('stat-content').textContent = data.content_alerts;
       document.getElementById('stat-watches').textContent = data.total_watches;
     } catch (e) {
       console.error('Stats load error:', e);
@@ -521,23 +538,24 @@
       const watchMap = {};
       watchesCache.forEach(w => { watchMap[w.uuid] = w; });
 
-      document.getElementById('alert-count').textContent = `${alerts.length}개의 알림`;
-
-      if (alerts.length === 0) {
-        list.innerHTML = `<div class="empty"><div class="icon">📭</div>아직 알림이 없습니다.</div>`;
-        return;
-      }
-
       if (currentTab === 'all') {
-        // 전체 탭: 최신순 플랫 리스트, 카드에 사이트명 표시
         list.innerHTML = alerts.map(alert => {
           const w = watchMap[alert.watch_uuid] || {};
           const label = w.title || w.url || alert.url;
           return renderAlert(alert, label);
         }).join('');
       } else {
-        // 개별 watch 탭: 그룹 헤더 없이 바로 카드 나열
         list.innerHTML = alerts.map(alert => renderAlert(alert)).join('');
+      }
+
+      const visible = document.querySelectorAll('#alert-list .alert-card').length;
+      document.getElementById('alert-count').textContent = `${visible}개의 알림`;
+      if (currentTab === 'all') {
+        document.getElementById('stat-total').textContent = visible;
+      }
+
+      if (visible === 0) {
+        list.innerHTML = `<div class="empty"><div class="icon">📭</div>아직 알림이 없습니다.</div>`;
       }
 
     } catch (e) {
@@ -545,8 +563,25 @@
     }
   }
 
+  // ── 닫기(dismiss) ─────────────────────────────────────────────────────────
+  const dismissed = new Set(JSON.parse(localStorage.getItem('dismissedAlerts') || '[]'));
+
+  function dismissAlert(id, el) {
+    dismissed.add(id);
+    localStorage.setItem('dismissedAlerts', JSON.stringify([...dismissed]));
+    el.closest('.alert-card').remove();
+
+    const remaining = document.querySelectorAll('#alert-list .alert-card').length;
+    document.getElementById('alert-count').textContent = `${remaining}개의 알림`;
+    if (currentTab === 'all') {
+      document.getElementById('stat-total').textContent = remaining;
+    }
+  }
+
   // ── 알림 카드 렌더링 ───────────────────────────────────────────────────────
   function renderAlert(alert, siteLabel) {
+    if (dismissed.has(alert.id)) return '';
+
     const a = alert.analysis;
     const time = alert.changed_at
       ? new Date(alert.changed_at * 1000).toLocaleString('ko-KR')
@@ -556,7 +591,15 @@
     const linkClass = siteLabel ? 'site-tag' : 'url-link';
     const siteTag = `<a class="${linkClass}" href="${escHtml(alert.url)}" target="_blank" rel="noopener">${escHtml(linkText)}</a>`;
 
-    const summary = a.summary ? `<div class="summary">${linkify(a.summary)}</div>` : '';
+    // Title: shown verbatim if present (new format); fall back gracefully for old alerts
+    const titleHtml = a.title
+      ? `<div class="alert-title">${escHtml(a.title)}</div>`
+      : '';
+
+    const summaryHtml = a.summary
+      ? `<div class="summary">${linkify(a.summary)}</div>`
+      : '';
+
 
     return `
       <div class="alert-card">
@@ -564,9 +607,11 @@
           ${siteTag}
           <div class="meta">
             <span class="time">${time}</span>
+            <button class="dismiss-btn" onclick="dismissAlert(${alert.id}, this)" title="닫기">&times;</button>
           </div>
         </div>
-        ${summary}
+        ${titleHtml}
+        ${summaryHtml}
       </div>`;
   }
 
@@ -612,7 +657,7 @@
       <div class="watch-card" id="watch-${w.uuid}">
         <div class="watch-info">
           <div class="watch-title">${escHtml(w.title || w.url)}</div>
-          <div class="watch-url">${escHtml(w.url)}</div>
+          <a class="watch-url" href="${escHtml(w.url)}" target="_blank" rel="noopener">${escHtml(w.url)}</a>
         </div>
         <button class="edit-btn" onclick="editWatch('${w.uuid}', '${escHtml(w.title || '')}')">수정</button>
         <button class="del-btn" onclick="deleteWatch('${w.uuid}')">삭제</button>

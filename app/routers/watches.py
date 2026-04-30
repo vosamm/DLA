@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from database import get_db
-from scheduler import determine_type
 from services.changedetection import changedetection
 
 router = APIRouter(prefix="/api/watches", tags=["watches"])
@@ -11,10 +10,12 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 class WatchCreate(BaseModel):
     url: str
     title: str = ""
+    type: str = "content"  # "content" | "market"
 
 
 class WatchUpdate(BaseModel):
     title: str
+    type: str | None = None
 
 
 @router.get("/")
@@ -34,7 +35,7 @@ async def list_watches():
     for uuid, data in cd_watches.items():
         title = data.get("title", "")
         tags = data.get("tags", [])
-        type_ = local.get(uuid, {}).get("type") or determine_type(title, tags)
+        type_ = local.get(uuid, {}).get("type") or "content"
         result.append({
             "uuid": uuid,
             "url": data.get("url", ""),
@@ -50,6 +51,13 @@ async def list_watches():
 async def create_watch(body: WatchCreate):
     try:
         result = await changedetection.create_watch(body.url, body.title)
+        uuid = result.get("uuid", "")
+        if uuid:
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO watches (uuid, url, title, type) VALUES (?, ?, ?, ?)",
+                    (uuid, body.url, body.title, body.type),
+                )
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -60,7 +68,13 @@ async def update_watch(uuid: str, body: WatchUpdate):
     try:
         await changedetection.update_watch(uuid, body.title)
         with get_db() as conn:
-            conn.execute("UPDATE watches SET title = ? WHERE uuid = ?", (body.title, uuid))
+            if body.type is not None:
+                conn.execute(
+                    "UPDATE watches SET title = ?, type = ? WHERE uuid = ?",
+                    (body.title, body.type, uuid),
+                )
+            else:
+                conn.execute("UPDATE watches SET title = ? WHERE uuid = ?", (body.title, uuid))
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
