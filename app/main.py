@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting VisualMonitor...")
+    logger.info("Starting Notice Ping...")
     init_db()
     try:
         n = await changedetection.migrate_to_playwright()
@@ -31,13 +31,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Playwright migration skipped: {e}")
     scheduler = start_scheduler()
     asyncio.create_task(poll_changes())
-    logger.info("VisualMonitor running.")
+    logger.info("Notice Ping running.")
     yield
     scheduler.shutdown()
-    logger.info("VisualMonitor stopped.")
+    logger.info("Notice Ping stopped.")
 
 
-app = FastAPI(title="VisualMonitor", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Notice Ping", version="1.0.0", lifespan=lifespan)
 
 app.include_router(alerts.router)
 app.include_router(watches.router)

@@ -34,7 +34,6 @@ async def list_watches():
     result = []
     for uuid, data in cd_watches.items():
         title = data.get("title", "")
-        tags = data.get("tags", [])
         type_ = local.get(uuid, {}).get("type") or "content"
         result.append({
             "uuid": uuid,

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VisualMonitor</title>
+  <title>Notice Ping</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -381,7 +381,7 @@
 <body>
 
 <header>
-  <h1>VisualMonitor</h1>
+  <h1>Notice Ping</h1>
   <span id="last-updated">로드 중...</span>
 </header>
 
@@ -415,6 +415,12 @@
 
   <!-- 모니터 관리 탭 -->
   <div id="manage-panel" style="display:none;">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+      <a href="http://localhost:5000" target="_blank" rel="noopener"
+         style="font-size:13px; color:#7c3aed; text-decoration:none; display:flex; align-items:center; gap:5px;">
+        changedetection.io 열기 ↗
+      </a>
+    </div>
     <div class="add-form">
       <div class="field" style="flex:2;min-width:240px;">
         <label>URL</label>

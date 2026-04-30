@@ -51,7 +51,7 @@ services:
 
   app:
     build: ./app
-    container_name: visualmonitor-app
+    container_name: noticeping-app
     ports:
       - "8000:8000"
     environment:

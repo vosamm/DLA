@@ -1,21 +1,22 @@
-# VisualMonitor
+# Notice Ping
 
 웹사이트 변경을 감지하고 로컬 AI로 요약해주는 셀프 호스팅 모니터링 서비스입니다.  
-공지사항, 뉴스 등 원하는 페이지를 등록하면 변경이 감지될 때마다 AI가 핵심 내용을 요약합니다.
+공지사항·뉴스부터 거래 사이트까지, 원하는 페이지를 등록하면 변경이 감지될 때마다 AI가 핵심 내용을 요약합니다.
 
 ## 구조
 
 ```
 changedetection.io  →  웹사이트 변경 감지 (5분 주기)
         ↓
-visualmonitor-app   →  변경 분석 → 스크린샷 + diff → AI 요약 → 알림 저장
+noticeping-app   →  타입별 분석 파이프라인 → AI 요약 → 알림 저장
         ↑
 ollama (gemma4:e2b) →  로컬 멀티모달 AI 분석 엔진
 ```
 
 | 서비스 | 주소 |
 |--------|------|
-| VisualMonitor 대시보드 | http://localhost:8000 |
+| Notice Ping 대시보드 | http://localhost:8000 |
+| changedetection.io | http://localhost:5000 |
 | Ollama API | http://localhost:11434 |
 
 ---
@@ -58,8 +59,11 @@ docker compose up -d
 # 재시작 (데이터 유지)
 docker compose down && docker compose up -d
 
-# 코드 변경 후 재빌드
-docker compose down && docker compose up -d --build
+# 코드 변경 후 앱만 재시작 (코드 변경 시)
+docker restart noticeping-app
+
+# 이미지 재빌드가 필요한 경우 (의존성 변경 시)
+docker compose up -d --build app
 ```
 
 ---
@@ -73,6 +77,7 @@ http://localhost:8000 → **모니터 관리** 탭
 - **추가**: URL과 이름 입력 후 추가 버튼 (자동으로 5분 주기 감지 등록)
 - **이름 수정**: 목록에서 **수정** 버튼 클릭 → 인라인 편집
 - **삭제**: **삭제** 버튼 클릭
+- **changedetection.io 직접 접근**: 탭 우측 상단 `changedetection.io 열기 ↗` 링크 (http://localhost:5000)
 
 ### 알림 확인
 
@@ -82,13 +87,45 @@ http://localhost:8000 메인 화면
 - **사이트별 탭**: 등록한 모니터 이름으로 탭이 자동 생성, 해당 사이트 알림만 표시
 - 알림 카드의 사이트명 또는 URL을 클릭하면 해당 페이지로 이동
 
-### AI 분석 동작 방식
+---
+
+## 모니터 타입
+
+모니터는 사이트 성격에 따라 두 가지 타입으로 구분됩니다.
+
+| 타입 | 대상 | AI 분석 방식 |
+|------|------|-------------|
+| `content` | 공지사항, 뉴스, 커뮤니티 | 텍스트 diff만 LLM 전달 |
+| `market` | 중고거래, 쇼핑몰, 매물 | 텍스트 diff + 스크린샷 → Vision LLM |
+
+기본값은 `content`입니다. 타입 지정은 API로 가능합니다:
+
+```bash
+# 등록 시 타입 지정
+curl -X POST http://localhost:8000/api/watches/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "title": "중고나라", "type": "market"}'
+
+# 기존 모니터 타입 변경
+curl -X PUT http://localhost:8000/api/watches/<uuid> \
+  -H "Content-Type: application/json" \
+  -d '{"title": "중고나라", "type": "market"}'
+```
+
+---
+
+## AI 분석 동작 방식
 
 1. changedetection이 페이지 변경 감지 (5분 주기)
 2. 앱이 30초마다 폴링해서 신규 변경 확인
-3. **단순 숫자 변화(조회수, 건수 등)는 자동 무시**
-4. 실제 변경이면 페이지 스크린샷 + 텍스트 diff를 Ollama에 전달
-5. gemma4:e2b가 텍스트와 이미지를 함께 분석해 한국어 요약 생성
+3. 다음 변경은 자동으로 무시:
+   - 숫자·조회수·건수만 바뀐 경우
+   - 커뮤니티 포인트/점수 변경 (`N points by username` 패턴)
+   - **content 타입**: 상업성 키워드가 다수 포함된 광고·스팸 게시글
+4. 타입별 LLM 분석:
+   - **content**: 텍스트 diff → 공지·뉴스 여부 판단 → 한국어 요약
+   - **market**: 텍스트 diff + 스크린샷 → 신규 매물·상품 여부 판단 → 한국어 요약
+5. 동일 제목의 알림은 중복 저장하지 않음
 
 ---
 
@@ -98,6 +135,7 @@ http://localhost:8000 메인 화면
 |------|------|--------|
 | `CHANGEDETECTION_API_KEY` | changedetection.io API 토큰 | `localkey123` |
 | `POLL_INTERVAL` | 앱의 changedetection 폴링 주기 (초) | `30` |
+| `IGNORE_TOP_LINES` | 텍스트 diff 상위 N줄 무시 (헤더·배너 노이즈 방지) | `10` |
 
 changedetection의 실제 웹사이트 체크 주기는 기본 **5분**이며, URL 등록 시 자동 설정됩니다.
 
@@ -107,7 +145,7 @@ changedetection의 실제 웹사이트 체크 주기는 기본 **5분**이며, U
 
 ```
 data/
-├── app/visualmonitor.db     ← 알림 및 watch 이력 (SQLite)
+├── app/noticeping.db     ← 알림 및 watch 이력 (SQLite)
 ├── changedetection/         ← 페이지 스냅샷, 설정
 └── ollama/                  ← AI 모델 파일 (수 GB)
 ```
@@ -119,7 +157,7 @@ data/
 ## 기술 스택
 
 - **Backend**: FastAPI, APScheduler, httpx
-- **AI**: Ollama (gemma4:e2b, 멀티모달)
-- **변경 감지**: changedetection.io
+- **AI**: Ollama (gemma4:e2b, 멀티모달 Vision)
+- **변경 감지**: changedetection.io + Playwright
 - **인프라**: Docker Compose
 - **DB**: SQLite

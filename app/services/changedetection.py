@@ -87,20 +87,6 @@ class ChangeDetectionClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_html_snapshot(self, uuid: str, timestamp: str) -> str | None:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(
-                    f"{self.base_url}/api/v1/watch/{uuid}/history/{timestamp}",
-                    headers=self.headers,
-                    params={"html": "1"},
-                )
-                if resp.status_code == 200:
-                    return resp.text
-        except Exception as e:
-            logger.debug(f"HTML snapshot fetch failed for {uuid}: {e}")
-        return None
-
     async def get_screenshot(self, uuid: str) -> bytes | None:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
