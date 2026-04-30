@@ -1,0 +1,60 @@
+<div class="modal-overlay" id="help-modal" onclick="closeHelpOnOverlay(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Notice Ping 사용 방법</h2>
+      <button class="modal-close" onclick="closeHelp()">&times;</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="help-section">
+        <h3>기본 사용</h3>
+        <ul>
+          <li><b>모니터 등록</b>: 모니터 관리 탭 → URL과 이름 입력 → 추가</li>
+          <li><b>감지 주기</b>: changedetection.io가 5분마다 페이지 크롤링, 앱이 30초마다 변경 여부 확인</li>
+          <li><b>알림 확인</b>: 전체 탭 또는 사이트별 탭에서 AI 요약 카드 확인</li>
+          <li><b>설정 변경</b>: 각 모니터의 <b>설정</b> 버튼 → 타입 및 무시 라인 수 조정 후 저장</li>
+        </ul>
+      </div>
+
+      <div class="help-section">
+        <h3>모니터 타입</h3>
+        <div class="help-row">
+          <div class="help-card">
+            <div class="hc-badge content">content</div>
+            <div class="hc-title">공지 / 정보 / 뉴스</div>
+            <p>텍스트 diff로 분석. 상업성 스팸 자동 필터링. 기본값.</p>
+          </div>
+          <div class="help-card">
+            <div class="hc-badge market">market</div>
+            <div class="hc-title">중고거래 / 쇼핑몰</div>
+            <p>스크린샷 + Vision AI 분석. 상업 키워드 필터 미적용.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>상단 무시 라인 수</h3>
+        <ul>
+          <li>페이지 상단의 헤더·내비게이션 변화를 무시하기 위한 설정</li>
+          <li>새 글이 페이지 상단에 추가되는 사이트는 <b>헤더 줄 수만큼 낮게</b> 설정</li>
+          <li>비워두면 전역 기본값(10줄) 사용</li>
+        </ul>
+        <div class="help-tip" style="margin-top:10px;">
+          💡 알림이 오지 않는다면 changedetection.io 변경 히스토리에서 초록색 줄이 몇 번째 줄부터 시작하는지 확인 후 그 값보다 작게 설정하세요.
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>changedetection.io 고급 설정</h3>
+        <p style="margin-bottom:10px;"><a class="help-link" href="http://localhost:5000" target="_blank" rel="noopener">localhost:5000</a>에서 watch별로 더 세밀한 설정이 가능합니다.</p>
+        <ul>
+          <li><b>시각적 필터 선택기</b>: 마우스로 감지할 영역을 직접 클릭해서 지정. 헤더·광고·사이드바를 통째로 제외할 수 있어 <b>무시 라인 수보다 정확</b>합니다.<br><span style="color:#94a3b8; font-size:12px;">Watch 편집 → Visual Filter Selector (또는 CSS/XPath Selector 직접 입력)</span></li>
+          <li><b>체크 주기 변경</b>: Watch별로 1분~수 시간 단위로 조정 가능<br><span style="color:#94a3b8; font-size:12px;">Watch 편집 → Time between checks</span></li>
+          <li><b>텍스트 포함/제외 필터</b>: 특정 키워드가 있을 때만 알림<br><span style="color:#94a3b8; font-size:12px;">Watch 편집 → Filters &amp; Triggers → Text to filter</span></li>
+          <li><b>JavaScript 실행</b>: 페이지 로드 후 JS를 실행해서 로그인·클릭 등 처리<br><span style="color:#94a3b8; font-size:12px;">Watch 편집 → Request → Execute JS</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>

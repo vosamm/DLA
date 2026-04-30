@@ -45,5 +45,9 @@ def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (watch_uuid) REFERENCES watches(uuid)
             );
-
         """)
+        # 마이그레이션: 기존 테이블에 컬럼 추가 (이미 있으면 무시)
+        try:
+            conn.execute("ALTER TABLE watches ADD COLUMN ignore_top_lines INTEGER DEFAULT NULL")
+        except Exception:
+            pass

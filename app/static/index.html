@@ -277,15 +277,20 @@
       border: 1px solid #e2e8f0;
       border-radius: 10px;
       padding: 14px 18px;
+    }
+
+    .watch-main {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
     }
 
+    .watch-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
     .watch-card .watch-info { flex: 1; min-width: 0; }
     .watch-card .watch-title { font-size: 14px; font-weight: 500; color: #1e293b; margin-bottom: 3px; }
-    .watch-card .watch-url { font-size: 12px; color: #2563eb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .watch-card .watch-url { font-size: 12px; color: #2563eb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
     button.del-btn {
       background: transparent;
@@ -356,6 +361,64 @@
       flex-shrink: 0;
     }
 
+    button.settings-btn {
+      background: transparent;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    button.settings-btn:hover { background: #f1f5f9; }
+    button.settings-btn.active { background: #f1f5f9; border-color: #7c3aed; color: #7c3aed; }
+
+    .settings-panel {
+      border-top: 1px solid #f1f5f9;
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+
+    .settings-row {
+      display: flex;
+      gap: 16px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .setting-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .setting-field label {
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .setting-field select,
+    .setting-field input[type="number"] {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      color: #1e293b;
+      padding: 6px 10px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .setting-field select:focus,
+    .setting-field input[type="number"]:focus { border-color: #7c3aed; }
+
+    .setting-field input[type="number"] { width: 120px; }
+
     .toast {
       position: fixed;
       bottom: 24px;
@@ -376,14 +439,156 @@
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.success { border-color: #059669; color: #059669; }
     .toast.error { border-color: #dc2626; color: #dc2626; }
+
+    /* 도움말 버튼 */
+    .help-btn {
+      background: none;
+      border: 1px solid #e2e8f0;
+      color: #94a3b8;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .help-btn:hover { border-color: #7c3aed; color: #7c3aed; }
+
+    /* 모달 */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: #ffffff;
+      border-radius: 14px;
+      width: 100%;
+      max-width: 620px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid #f1f5f9;
+      flex-shrink: 0;
+    }
+
+    .modal-header h2 { font-size: 16px; font-weight: 700; color: #1e293b; }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 20px;
+      color: #94a3b8;
+      cursor: pointer;
+      line-height: 1;
+      padding: 0;
+    }
+    .modal-close:hover { color: #475569; }
+
+    .modal-body {
+      overflow-y: auto;
+      padding: 20px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .help-section h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #7c3aed;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .help-section p, .help-section li {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.7;
+    }
+
+    .help-section ul { padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
+
+    .help-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .help-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .help-card .hc-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 4px;
+    }
+
+    .help-card .hc-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-bottom: 6px;
+    }
+
+    .hc-badge.content { background: #dbeafe; color: #2563eb; }
+    .hc-badge.market  { background: #ede9fe; color: #7c3aed; }
+
+    .help-card p { font-size: 12px; color: #64748b; line-height: 1.6; }
+
+    .help-tip {
+      background: #fefce8;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #92400e;
+      line-height: 1.6;
+    }
+
+    .help-link {
+      color: #7c3aed;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .help-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
 
 <header>
   <h1>Notice Ping</h1>
-  <span id="last-updated">로드 중...</span>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <span id="last-updated">로드 중...</span>
+    <button class="help-btn" onclick="openHelp()" title="사용 방법">?</button>
+  </div>
 </header>
+
 
 <div class="stats">
   <div class="stat-card total">
@@ -659,15 +864,65 @@
   }
 
   function renderWatchCard(w) {
+    const skipVal = (w.ignore_top_lines !== null && w.ignore_top_lines !== undefined) ? w.ignore_top_lines : '';
     return `
       <div class="watch-card" id="watch-${w.uuid}">
-        <div class="watch-info">
-          <div class="watch-title">${escHtml(w.title || w.url)}</div>
-          <a class="watch-url" href="${escHtml(w.url)}" target="_blank" rel="noopener">${escHtml(w.url)}</a>
+        <div class="watch-main">
+          <div class="watch-info">
+            <div class="watch-title">${escHtml(w.title || w.url)}</div>
+            <a class="watch-url" href="${escHtml(w.url)}" target="_blank" rel="noopener">${escHtml(w.url)}</a>
+          </div>
+          <div class="watch-actions">
+            <button class="settings-btn" id="settings-btn-${w.uuid}" onclick="toggleSettings('${w.uuid}')">설정</button>
+            <button class="edit-btn" onclick="editWatch('${w.uuid}', '${escHtml(w.title || '')}')">수정</button>
+            <button class="del-btn" onclick="deleteWatch('${w.uuid}')">삭제</button>
+          </div>
         </div>
-        <button class="edit-btn" onclick="editWatch('${w.uuid}', '${escHtml(w.title || '')}')">수정</button>
-        <button class="del-btn" onclick="deleteWatch('${w.uuid}')">삭제</button>
+        <div class="settings-panel" id="settings-${w.uuid}" style="display:none;">
+          <div class="settings-row">
+            <div class="setting-field">
+              <label>타입</label>
+              <select id="type-${w.uuid}">
+                <option value="content" ${w.type === 'content' ? 'selected' : ''}>공지/뉴스 (content)</option>
+                <option value="market" ${w.type === 'market' ? 'selected' : ''}>거래/상품 (market)</option>
+              </select>
+            </div>
+            <div class="setting-field">
+              <label>상단 무시 라인 수</label>
+              <input type="number" id="skip-${w.uuid}" value="${skipVal}" placeholder="기본값 (10)" min="0" />
+            </div>
+            <button class="save-btn" onclick="saveSettings('${w.uuid}')">저장</button>
+          </div>
+        </div>
       </div>`;
+  }
+
+  function toggleSettings(uuid) {
+    const panel = document.getElementById(`settings-${uuid}`);
+    const btn = document.getElementById(`settings-btn-${uuid}`);
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    btn.classList.toggle('active', !isOpen);
+  }
+
+  async function saveSettings(uuid) {
+    const card = document.getElementById(`watch-${uuid}`);
+    const title = card.querySelector('.watch-title').textContent;
+    const type = document.getElementById(`type-${uuid}`).value;
+    const skipInput = document.getElementById(`skip-${uuid}`).value;
+    const ignore_top_lines = skipInput === '' ? null : parseInt(skipInput);
+    try {
+      const res = await fetch(`/api/watches/${uuid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, type, ignore_top_lines }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast('설정이 저장됐습니다');
+      toggleSettings(uuid);
+    } catch (e) {
+      showToast('저장 실패: ' + e.message, 'error');
+    }
   }
 
   function editWatch(uuid, currentTitle) {
@@ -682,6 +937,7 @@
       </div>`;
     card.querySelector('.edit-btn').style.display = 'none';
     card.querySelector('.del-btn').style.display = 'none';
+    card.querySelector('.settings-btn').style.display = 'none';
     document.getElementById(`edit-input-${uuid}`).focus();
   }
 
@@ -741,6 +997,30 @@
     } catch (e) {
       showToast('삭제 실패: ' + e.message, 'error');
     }
+  }
+
+  // ── 도움말 모달 ────────────────────────────────────────────────────────────
+  async function openHelp() {
+    if (!document.getElementById('help-modal')) {
+      const res = await fetch('/static/help.html');
+      const html = await res.text();
+      document.body.insertAdjacentHTML('beforeend', html);
+    }
+    document.getElementById('help-modal').classList.add('open');
+    document.addEventListener('keydown', closeHelpOnEsc);
+  }
+
+  function closeHelp() {
+    document.getElementById('help-modal').classList.remove('open');
+    document.removeEventListener('keydown', closeHelpOnEsc);
+  }
+
+  function closeHelpOnOverlay(e) {
+    if (e.target === document.getElementById('help-modal')) closeHelp();
+  }
+
+  function closeHelpOnEsc(e) {
+    if (e.key === 'Escape') closeHelp();
   }
 
   // ── 자동 새로고침 (30초) ───────────────────────────────────────────────────

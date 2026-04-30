@@ -64,9 +64,8 @@ def db_save_alert(
 
 
 # ── 파이프라인 헬퍼 ───────────────────────────────────────────────────────────
-def extract_diff_lines(previous: str, current: str) -> tuple[list[str], list[str]]:
+def extract_diff_lines(previous: str, current: str, skip: int) -> tuple[list[str], list[str]]:
     import difflib
-    skip = settings.ignore_top_lines
     diff = difflib.unified_diff(
         previous.splitlines()[skip:],
         current.splitlines()[skip:],
@@ -131,7 +130,8 @@ def is_commercial_spam(new_lines: list[str]) -> bool:
 
 
 # ── 변경 처리 ─────────────────────────────────────────────────────────────────
-async def process_watch(uuid: str, url: str, title: str, type_: str, last_changed: int):
+async def process_watch(uuid: str, url: str, title: str, type_: str, last_changed: int, ignore_top_lines: int | None = None):
+    skip = ignore_top_lines if ignore_top_lines is not None else settings.ignore_top_lines
     try:
         history = await changedetection.get_history(uuid)
         timestamps = sorted(history.keys(), key=lambda x: int(x))
@@ -144,9 +144,9 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
 
         if len(timestamps) >= 2:
             previous_text = await changedetection.get_snapshot(uuid, timestamps[-2])
-            new_lines, removed_lines = extract_diff_lines(previous_text, current_text)
+            new_lines, removed_lines = extract_diff_lines(previous_text, current_text, skip)
         else:
-            new_lines = [l.strip() for l in current_text.splitlines()[settings.ignore_top_lines:] if l.strip()][:30]
+            new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:30]
             removed_lines = []
 
         if not new_lines:
@@ -206,21 +206,23 @@ async def poll_changes():
         return
 
     with get_db() as conn:
-        saved_types = {
-            r["uuid"]: r["type"]
-            for r in conn.execute("SELECT uuid, type FROM watches").fetchall()
+        saved_watches = {
+            r["uuid"]: dict(r)
+            for r in conn.execute("SELECT uuid, type, ignore_top_lines FROM watches").fetchall()
         }
 
     for uuid, data in watches.items():
         url = data.get("url", "")
         title = data.get("title", "")
         last_changed = data.get("last_changed") or 0
-        type_ = saved_types.get(uuid) or "content"
+        saved = saved_watches.get(uuid, {})
+        type_ = saved.get("type") or "content"
+        ignore_top_lines = saved.get("ignore_top_lines")
 
         db_upsert_watch(uuid, url, title, type_, last_changed)
 
         if last_changed and last_changed > db_get_last_processed(uuid):
-            await process_watch(uuid, url, title, type_, last_changed)
+            await process_watch(uuid, url, title, type_, last_changed, ignore_top_lines)
 
 
 def start_scheduler() -> AsyncIOScheduler:

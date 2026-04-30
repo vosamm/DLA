@@ -11,11 +11,13 @@ class WatchCreate(BaseModel):
     url: str
     title: str = ""
     type: str = "content"  # "content" | "market"
+    ignore_top_lines: int | None = None
 
 
 class WatchUpdate(BaseModel):
     title: str
     type: str | None = None
+    ignore_top_lines: int | None = None
 
 
 @router.get("/")
@@ -34,12 +36,15 @@ async def list_watches():
     result = []
     for uuid, data in cd_watches.items():
         title = data.get("title", "")
-        type_ = local.get(uuid, {}).get("type") or "content"
+        local_data = local.get(uuid, {})
+        type_ = local_data.get("type") or "content"
+        ignore_top_lines = local_data.get("ignore_top_lines")
         result.append({
             "uuid": uuid,
             "url": data.get("url", ""),
             "title": title,
             "type": type_,
+            "ignore_top_lines": ignore_top_lines,
             "last_changed": data.get("last_changed"),
         })
 
@@ -54,8 +59,8 @@ async def create_watch(body: WatchCreate):
         if uuid:
             with get_db() as conn:
                 conn.execute(
-                    "INSERT OR IGNORE INTO watches (uuid, url, title, type) VALUES (?, ?, ?, ?)",
-                    (uuid, body.url, body.title, body.type),
+                    "INSERT OR IGNORE INTO watches (uuid, url, title, type, ignore_top_lines) VALUES (?, ?, ?, ?, ?)",
+                    (uuid, body.url, body.title, body.type, body.ignore_top_lines),
                 )
         return result
     except Exception as e:
@@ -67,13 +72,18 @@ async def update_watch(uuid: str, body: WatchUpdate):
     try:
         await changedetection.update_watch(uuid, body.title)
         with get_db() as conn:
-            if body.type is not None:
-                conn.execute(
-                    "UPDATE watches SET title = ?, type = ? WHERE uuid = ?",
-                    (body.title, body.type, uuid),
-                )
-            else:
-                conn.execute("UPDATE watches SET title = ? WHERE uuid = ?", (body.title, uuid))
+            updates = ["title = ?"]
+            params: list = [body.title]
+            if "type" in body.model_fields_set:
+                updates.append("type = ?")
+                params.append(body.type)
+            if "ignore_top_lines" in body.model_fields_set:
+                updates.append("ignore_top_lines = ?")
+                params.append(body.ignore_top_lines)
+            params.append(uuid)
+            conn.execute(
+                f"UPDATE watches SET {', '.join(updates)} WHERE uuid = ?", params
+            )
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
