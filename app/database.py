@@ -31,6 +31,7 @@ def init_db():
                 type TEXT DEFAULT 'content',
                 last_changed INTEGER DEFAULT 0,
                 last_processed INTEGER DEFAULT 0,
+                ignore_top_lines INTEGER DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 

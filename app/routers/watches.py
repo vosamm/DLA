@@ -15,7 +15,7 @@ class WatchCreate(BaseModel):
 
 
 class WatchUpdate(BaseModel):
-    title: str
+    title: str | None = None
     type: str | None = None
     ignore_top_lines: int | None = None
 
@@ -70,20 +70,27 @@ async def create_watch(body: WatchCreate):
 @router.put("/{uuid}")
 async def update_watch(uuid: str, body: WatchUpdate):
     try:
-        await changedetection.update_watch(uuid, body.title)
-        with get_db() as conn:
-            updates = ["title = ?"]
-            params: list = [body.title]
-            if "type" in body.model_fields_set:
-                updates.append("type = ?")
-                params.append(body.type)
-            if "ignore_top_lines" in body.model_fields_set:
-                updates.append("ignore_top_lines = ?")
-                params.append(body.ignore_top_lines)
+        if "title" in body.model_fields_set and body.title is not None:
+            await changedetection.update_watch(uuid, body.title)
+
+        updates: list[str] = []
+        params: list = []
+        if "title" in body.model_fields_set:
+            updates.append("title = ?")
+            params.append(body.title)
+        if "type" in body.model_fields_set:
+            updates.append("type = ?")
+            params.append(body.type)
+        if "ignore_top_lines" in body.model_fields_set:
+            updates.append("ignore_top_lines = ?")
+            params.append(body.ignore_top_lines)
+
+        if updates:
             params.append(uuid)
-            conn.execute(
-                f"UPDATE watches SET {', '.join(updates)} WHERE uuid = ?", params
-            )
+            with get_db() as conn:
+                conn.execute(
+                    f"UPDATE watches SET {', '.join(updates)} WHERE uuid = ?", params
+                )
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

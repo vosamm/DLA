@@ -28,7 +28,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 16px;
       padding: 24px 32px;
     }
@@ -43,7 +43,6 @@
     .stat-card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
     .stat-card .value { font-size: 32px; font-weight: 700; margin-top: 6px; }
     .stat-card.total .value { color: #7c3aed; }
-    .stat-card.content .value { color: #2563eb; }
     .stat-card.watches .value { color: #d97706; }
 
     .tabs {
@@ -154,18 +153,6 @@
       flex-shrink: 0;
     }
 
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-    }
-
-    .badge.content { background: #dbeafe; color: #2563eb; }
-
     .alert-card .time { font-size: 12px; color: #94a3b8; }
 
     .alert-card .alert-title {
@@ -191,22 +178,6 @@
     }
 
     .summary-link:hover { text-decoration: underline; }
-
-    .topics {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    .topic {
-      background: #f1f5f9;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 12px;
-      color: #64748b;
-    }
 
     .empty {
       text-align: center;
@@ -577,6 +548,38 @@
       font-weight: 600;
     }
     .help-link:hover { text-decoration: underline; }
+
+    /* iframe 모달 */
+    .modal-iframe {
+      max-width: 1100px;
+      width: 95vw;
+      height: 90vh;
+      max-height: 90vh;
+    }
+
+    .modal-iframe .modal-header {
+      padding: 14px 20px;
+    }
+
+    .vf-iframe {
+      flex: 1;
+      width: 100%;
+      border: none;
+      border-radius: 0 0 14px 14px;
+    }
+
+    button.filter-btn {
+      background: transparent;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    button.filter-btn:hover { background: #f1f5f9; }
   </style>
 </head>
 <body>
@@ -620,12 +623,6 @@
 
   <!-- 모니터 관리 탭 -->
   <div id="manage-panel" style="display:none;">
-    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
-      <a href="http://localhost:5000" target="_blank" rel="noopener"
-         style="font-size:13px; color:#7c3aed; text-decoration:none; display:flex; align-items:center; gap:5px;">
-        changedetection.io 열기 ↗
-      </a>
-    </div>
     <div class="add-form">
       <div class="field" style="flex:2;min-width:240px;">
         <label>URL</label>
@@ -644,6 +641,17 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 시각적 필터 iframe 모달 -->
+<div class="modal-overlay" id="vf-modal" onclick="closeVFOnOverlay(event)">
+  <div class="modal modal-iframe">
+    <div class="modal-header">
+      <h2 id="vf-modal-title">시각적 필터 설정</h2>
+      <button class="modal-close" onclick="closeVF()">&times;</button>
+    </div>
+    <iframe id="vf-iframe" src="about:blank" class="vf-iframe"></iframe>
+  </div>
+</div>
 
 <script>
   let currentTab = 'all';
@@ -737,7 +745,7 @@
     list.innerHTML = '<div class="loading">불러오는 중...</div>';
 
     try {
-      const isUuid = currentTab !== 'all' && currentTab !== 'content';
+      const isUuid = currentTab !== 'all' && currentTab !== 'manage';
       const alertUrl = isUuid
         ? `/api/alerts/?watch_uuid=${currentTab}`
         : '/api/alerts/';
@@ -873,6 +881,7 @@
             <a class="watch-url" href="${escHtml(w.url)}" target="_blank" rel="noopener">${escHtml(w.url)}</a>
           </div>
           <div class="watch-actions">
+            <button class="filter-btn" onclick="openVF('${w.uuid}', '${escHtml(w.title || w.url)}')">시각적 필터</button>
             <button class="settings-btn" id="settings-btn-${w.uuid}" onclick="toggleSettings('${w.uuid}')">설정</button>
             <button class="edit-btn" onclick="editWatch('${w.uuid}', '${escHtml(w.title || '')}')">수정</button>
             <button class="del-btn" onclick="deleteWatch('${w.uuid}')">삭제</button>
@@ -906,8 +915,6 @@
   }
 
   async function saveSettings(uuid) {
-    const card = document.getElementById(`watch-${uuid}`);
-    const title = card.querySelector('.watch-title').textContent;
     const type = document.getElementById(`type-${uuid}`).value;
     const skipInput = document.getElementById(`skip-${uuid}`).value;
     const ignore_top_lines = skipInput === '' ? null : parseInt(skipInput);
@@ -915,7 +922,7 @@
       const res = await fetch(`/api/watches/${uuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, type, ignore_top_lines }),
+        body: JSON.stringify({ type, ignore_top_lines }),
       });
       if (!res.ok) throw new Error(await res.text());
       showToast('설정이 저장됐습니다');
@@ -935,9 +942,10 @@
         <button class="save-btn" onclick="saveWatch('${uuid}', '${escHtml(url)}')">저장</button>
         <button class="cancel-btn" onclick="loadWatches()">취소</button>
       </div>`;
+    card.querySelector('.filter-btn').style.display = 'none';
+    card.querySelector('.settings-btn').style.display = 'none';
     card.querySelector('.edit-btn').style.display = 'none';
     card.querySelector('.del-btn').style.display = 'none';
-    card.querySelector('.settings-btn').style.display = 'none';
     document.getElementById(`edit-input-${uuid}`).focus();
   }
 
@@ -1021,6 +1029,28 @@
 
   function closeHelpOnEsc(e) {
     if (e.key === 'Escape') closeHelp();
+  }
+
+  // ── 시각적 필터 iframe 모달 ───────────────────────────────────────────────
+  function openVF(uuid, title) {
+    document.getElementById('vf-modal-title').textContent = `시각적 필터 — ${title}`;
+    document.getElementById('vf-iframe').src = `http://localhost:5000/edit/${uuid}#visualselector`;
+    document.getElementById('vf-modal').classList.add('open');
+    document.addEventListener('keydown', closeVFOnEsc);
+  }
+
+  function closeVF() {
+    document.getElementById('vf-modal').classList.remove('open');
+    document.getElementById('vf-iframe').src = 'about:blank';
+    document.removeEventListener('keydown', closeVFOnEsc);
+  }
+
+  function closeVFOnOverlay(e) {
+    if (e.target === document.getElementById('vf-modal')) closeVF();
+  }
+
+  function closeVFOnEsc(e) {
+    if (e.key === 'Escape') closeVF();
   }
 
   // ── 자동 새로고침 (30초) ───────────────────────────────────────────────────

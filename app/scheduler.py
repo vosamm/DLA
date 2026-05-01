@@ -85,23 +85,23 @@ def extract_diff_lines(previous: str, current: str, skip: int) -> tuple[list[str
     return new_lines, removed_lines
 
 
+_TRIVIAL_LINE_PATTERNS = [
+    re.compile(r'^\d+\s+points?\s+by\s+\S+', re.IGNORECASE),  # "N point(s) by username ..."
+    re.compile(r'^조회\s*\d+'),
+    re.compile(r'^추천\s*\d+'),
+    re.compile(r'^(hit|view|click)s?\s*:?\s*\d+', re.IGNORECASE),
+]
+
+
+def is_trivial_line(line: str) -> bool:
+    return any(p.search(line) for p in _TRIVIAL_LINE_PATTERNS)
+
+
 def is_trivial_change(new_lines: list[str], removed_lines: list[str]) -> bool:
     """숫자만 바뀐 경우, 또는 커뮤니티 점수·조회수 패턴이면 True."""
     if not new_lines and not removed_lines:
         return True
 
-    # 커뮤니티 점수/조회수 패턴 (예: "2 points by tls60112", "조회 123", "추천 5")
-    TRIVIAL_LINE_PATTERNS = [
-        re.compile(r'^\d+\s+points?\s+by\s+\S+$', re.IGNORECASE),  # "N points by username"
-        re.compile(r'^조회\s*\d+'),
-        re.compile(r'^추천\s*\d+'),
-        re.compile(r'^(hit|view|click)s?\s*:?\s*\d+', re.IGNORECASE),
-    ]
-
-    def is_trivial_line(line: str) -> bool:
-        return any(p.search(line) for p in TRIVIAL_LINE_PATTERNS)
-
-    # 새 줄이 모두 trivial 패턴이면 스킵
     if new_lines and all(is_trivial_line(l) for l in new_lines):
         return True
 
@@ -115,7 +115,7 @@ def is_trivial_change(new_lines: list[str], removed_lines: list[str]) -> bool:
 
 # 상업성 키워드 (광고/스팸 사전 필터)
 _AD_KEYWORDS = [
-    "공장직영", "후불결제", "후불 결제", "사은품증정", "사은품 증정",
+    "공장직영", "후불결제", "후불 결제",
     "24시간배송", "24시간 배송", "페카매입", "당일배송", "무료배송",
     "공장가", "도매가", "특가판매", "할인쿠폰", "최저가보장",
     "구매문의", "판매문의", "재고문의", "A/S문의",
@@ -142,8 +142,16 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
         current_ts = timestamps[-1]
         current_text = await changedetection.get_snapshot(uuid, current_ts)
 
-        if len(timestamps) >= 2:
-            previous_text = await changedetection.get_snapshot(uuid, timestamps[-2])
+        # 마지막으로 처리한 스냅샷을 baseline으로 사용.
+        # 히스토리에 남아있으면 그 스냅샷을, 없으면 바로 이전 스냅샷을 사용.
+        last_processed = db_get_last_processed(uuid)
+        baseline_ts = next(
+            (ts for ts in reversed(timestamps[:-1]) if int(ts) <= last_processed),
+            timestamps[-2] if len(timestamps) >= 2 else None,
+        )
+
+        if baseline_ts:
+            previous_text = await changedetection.get_snapshot(uuid, baseline_ts)
             new_lines, removed_lines = extract_diff_lines(previous_text, current_text, skip)
         else:
             new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:30]
@@ -161,36 +169,43 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
         # LLM 분석: market 타입은 Vision, content 타입은 텍스트
         if type_ == "market":
             screenshot = await changedetection.get_screenshot(uuid)
-            result = await ollama.analyze_market(new_lines, screenshot)
+            results = await ollama.analyze_market(new_lines, screenshot)
         else:
             if is_commercial_spam(new_lines):
                 logger.info(f"Commercial spam detected, skipping: {url}")
                 db_mark_processed(uuid, last_changed)
                 return
-            result = await ollama.analyze(new_lines)
+            results = await ollama.analyze(new_lines)
 
-        found_title = result.get("title", "")
-        summary = result.get("summary", "")
-
-        if not found_title:
+        if not results:
             db_mark_processed(uuid, last_changed)
             return
 
-        # 동일 제목 중복 방지
-        with get_db() as conn:
-            exists = conn.execute(
-                "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
-                (uuid, found_title),
-            ).fetchone()
-        if exists:
-            logger.info(f"Duplicate alert skipped: [{found_title}]")
-            db_mark_processed(uuid, last_changed)
-            return
+        diff_text = "\n".join(new_lines)
+        saved_count = 0
+        for item in results:
+            found_title = item.get("title", "")
+            summary = item.get("summary", "")
+            if not found_title:
+                continue
 
-        analysis = {"title": found_title, "summary": summary}
-        db_save_alert(uuid, url, type_, analysis, "\n".join(new_lines), last_changed)
+            with get_db() as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
+                    (uuid, found_title),
+                ).fetchone()
+            if exists:
+                logger.info(f"Duplicate alert skipped: [{found_title}]")
+                continue
+
+            analysis = {"title": found_title, "summary": summary}
+            db_save_alert(uuid, url, type_, analysis, diff_text, last_changed)
+            logger.info(f"Alert saved: [{found_title}] {url}")
+            saved_count += 1
+
         db_mark_processed(uuid, last_changed)
-        logger.info(f"Alert saved: [{found_title}] {url}")
+        if saved_count == 0:
+            logger.info(f"No new alerts for {url}")
 
     except Exception as e:
         logger.error(f"Error processing watch {uuid} ({url}): {e}")
