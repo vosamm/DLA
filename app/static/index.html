@@ -96,7 +96,7 @@
       background: #ffffff;
       border: 1px solid #e2e8f0;
       border-radius: 10px;
-      padding: 18px 20px;
+      padding: 10px 14px;
       transition: border-color 0.15s;
     }
 
@@ -118,33 +118,42 @@
 
     .alert-card .top {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
     }
 
     .site-tag {
-      font-size: 12px;
-      font-weight: 600;
-      color: #7c3aed;
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
       text-decoration: none;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-right: 5px;
+      white-space: nowrap;
+      vertical-align: baseline;
     }
 
-    .site-tag:hover { text-decoration: underline; }
+    .site-tag:hover { opacity: 0.8; }
+    .site-tag.content { background: #dbeafe; color: #1d4ed8; }
+    .site-tag.market  { background: #ede9fe; color: #6d28d9; }
 
-    .url-link {
-      font-size: 12px;
+    .url-tag {
+      display: inline-block;
+      font-size: 11px;
       color: #2563eb;
       text-decoration: none;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 400px;
-      display: inline-block;
+      max-width: 160px;
+      vertical-align: baseline;
+      margin-right: 5px;
     }
 
-    .url-link:hover { text-decoration: underline; }
+    .url-tag:hover { text-decoration: underline; }
 
     .alert-card .meta {
       display: flex;
@@ -156,18 +165,20 @@
     .alert-card .time { font-size: 12px; color: #94a3b8; }
 
     .alert-card .alert-title {
+      flex: 1;
+      min-width: 0;
       font-size: 15px;
       font-weight: 700;
       color: #1e293b;
       line-height: 1.5;
-      margin-bottom: 6px;
+      margin-bottom: 0;
     }
 
     .alert-card .summary {
       font-size: 14px;
       color: #475569;
       line-height: 1.6;
-      margin-bottom: 10px;
+      margin-bottom: 4px;
     }
 
 
@@ -580,6 +591,25 @@
       transition: background 0.15s;
     }
     button.filter-btn:hover { background: #f1f5f9; }
+
+    .type-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 3px;
+      margin-left: 8px;
+      vertical-align: middle;
+      letter-spacing: 0.3px;
+    }
+    .type-badge.content { background: #dbeafe; color: #1d4ed8; }
+    .type-badge.market  { background: #ede9fe; color: #6d28d9; }
+
+    .watch-card.content { border-left: 3px solid #93c5fd; }
+    .watch-card.market  { border-left: 3px solid #c4b5fd; }
+
+    .alert-card.content { border-left: 3px solid #93c5fd; }
+    .alert-card.market  { border-left: 3px solid #c4b5fd; }
   </style>
 </head>
 <body>
@@ -806,30 +836,27 @@
       ? new Date(alert.changed_at * 1000).toLocaleString('ko-KR')
       : '-';
 
-    const linkText = siteLabel || alert.url;
-    const linkClass = siteLabel ? 'site-tag' : 'url-link';
-    const siteTag = `<a class="${linkClass}" href="${escHtml(alert.url)}" target="_blank" rel="noopener">${escHtml(linkText)}</a>`;
+    const type = alert.type || 'content';
 
-    // Title: shown verbatim if present (new format); fall back gracefully for old alerts
-    const titleHtml = a.title
-      ? `<div class="alert-title">${escHtml(a.title)}</div>`
-      : '';
+    const siteTagHtml = siteLabel
+      ? `<a class="site-tag ${type}" href="${escHtml(alert.url)}" target="_blank" rel="noopener">${escHtml(siteLabel)}</a>`
+      : `<a class="url-tag" href="${escHtml(alert.url)}" target="_blank" rel="noopener">${escHtml(alert.url)}</a>`;
+
+    const titleHtml = `<div class="alert-title">${siteTagHtml}${a.title ? escHtml(a.title) : ''}</div>`;
 
     const summaryHtml = a.summary
       ? `<div class="summary">${linkify(a.summary)}</div>`
       : '';
 
-
     return `
-      <div class="alert-card">
+      <div class="alert-card ${type}">
         <div class="top">
-          ${siteTag}
+          ${titleHtml}
           <div class="meta">
             <span class="time">${time}</span>
             <button class="dismiss-btn" onclick="dismissAlert(${alert.id}, this)" title="닫기">&times;</button>
           </div>
         </div>
-        ${titleHtml}
         ${summaryHtml}
       </div>`;
   }
@@ -873,11 +900,13 @@
 
   function renderWatchCard(w) {
     const skipVal = (w.ignore_top_lines !== null && w.ignore_top_lines !== undefined) ? w.ignore_top_lines : '';
+    const type = w.type || 'content';
+    const badgeLabel = type === 'market' ? '거래/상품' : '공지/뉴스';
     return `
-      <div class="watch-card" id="watch-${w.uuid}">
+      <div class="watch-card ${type}" id="watch-${w.uuid}">
         <div class="watch-main">
           <div class="watch-info">
-            <div class="watch-title">${escHtml(w.title || w.url)}</div>
+            <div class="watch-title">${escHtml(w.title || w.url)}<span class="type-badge ${type}">${badgeLabel}</span></div>
             <a class="watch-url" href="${escHtml(w.url)}" target="_blank" rel="noopener">${escHtml(w.url)}</a>
           </div>
           <div class="watch-actions">
@@ -926,7 +955,7 @@
       });
       if (!res.ok) throw new Error(await res.text());
       showToast('설정이 저장됐습니다');
-      toggleSettings(uuid);
+      loadWatches();
     } catch (e) {
       showToast('저장 실패: ' + e.message, 'error');
     }

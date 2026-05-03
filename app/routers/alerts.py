@@ -8,8 +8,17 @@ from services.changedetection import changedetection
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
+def _parse_alert_row(r) -> dict:
+    row = dict(r)
+    try:
+        row["analysis"] = json.loads(r["analysis"])
+    except (json.JSONDecodeError, TypeError):
+        row["analysis"] = {}
+    return row
+
+
 @router.get("/")
-async def list_alerts(watch_uuid: str = None, limit: int = 200):
+async def list_alerts(watch_uuid: str | None = None, limit: int = 200):
     with get_db() as conn:
         if watch_uuid:
             rows = conn.execute(
@@ -22,10 +31,7 @@ async def list_alerts(watch_uuid: str = None, limit: int = 200):
                 (limit,),
             ).fetchall()
 
-    return [
-        {**dict(r), "analysis": json.loads(r["analysis"])}
-        for r in rows
-    ]
+    return [_parse_alert_row(r) for r in rows]
 
 
 @router.get("/stats")

@@ -1,3 +1,4 @@
+import difflib
 import json
 import logging
 import re
@@ -65,7 +66,6 @@ def db_save_alert(
 
 # ── 파이프라인 헬퍼 ───────────────────────────────────────────────────────────
 def extract_diff_lines(previous: str, current: str, skip: int) -> tuple[list[str], list[str]]:
-    import difflib
     diff = difflib.unified_diff(
         previous.splitlines()[skip:],
         current.splitlines()[skip:],
@@ -122,6 +122,27 @@ _AD_KEYWORDS = [
 ]
 
 
+def dedup_by_prefix(items: list[dict], min_prefix: int = 15) -> list[dict]:
+    """같은 기사의 제목과 발췌가 중복 감지되지 않도록 공통 접두사 기반 중복 제거."""
+    unique: list[dict] = []
+    for item in items:
+        title = item["title"]
+        is_dup = False
+        for existing in unique:
+            prefix_len = 0
+            for a, b in zip(title, existing["title"]):
+                if a == b:
+                    prefix_len += 1
+                else:
+                    break
+            if prefix_len >= min_prefix:
+                is_dup = True
+                break
+        if not is_dup:
+            unique.append(item)
+    return unique
+
+
 def is_commercial_spam(new_lines: list[str]) -> bool:
     """상업성 키워드가 2개 이상 포함된 경우 광고/스팸으로 판단."""
     combined = " ".join(new_lines)
@@ -130,32 +151,57 @@ def is_commercial_spam(new_lines: list[str]) -> bool:
 
 
 # ── 변경 처리 ─────────────────────────────────────────────────────────────────
-async def process_watch(uuid: str, url: str, title: str, type_: str, last_changed: int, ignore_top_lines: int | None = None):
+async def _get_diff(uuid: str, last_processed: int, skip: int) -> tuple[list[str], list[str]]:
+    """현재 스냅샷과 baseline의 diff 라인을 반환."""
+    history = await changedetection.get_history(uuid)
+    timestamps = sorted(history.keys(), key=lambda x: int(x))
+    if not timestamps:
+        return [], []
+
+    current_text = await changedetection.get_snapshot(uuid, timestamps[-1])
+    baseline_ts = next(
+        (ts for ts in reversed(timestamps[:-1]) if int(ts) <= last_processed),
+        timestamps[-2] if len(timestamps) >= 2 else None,
+    )
+
+    if baseline_ts:
+        previous_text = await changedetection.get_snapshot(uuid, baseline_ts)
+        return extract_diff_lines(previous_text, current_text, skip)
+    else:
+        new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:30]
+        return new_lines, []
+
+
+def _save_new_alerts(
+    uuid: str, url: str, type_: str,
+    results: list[dict], diff_text: str, last_changed: int,
+) -> int:
+    """중복 확인 후 새 알림 저장. 저장된 수 반환."""
+    saved_count = 0
+    for item in results:
+        found_title = item.get("title", "")
+        summary = item.get("summary", "")
+        if not found_title:
+            continue
+        with get_db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
+                (uuid, found_title),
+            ).fetchone()
+        if exists:
+            logger.info(f"Duplicate alert skipped: [{found_title}]")
+            continue
+        db_save_alert(uuid, url, type_, {"title": found_title, "summary": summary}, diff_text, last_changed)
+        logger.info(f"Alert saved: [{found_title}] {url}")
+        saved_count += 1
+    return saved_count
+
+
+async def process_watch(uuid: str, url: str, title: str, type_: str, last_changed: int, ignore_top_lines: int | None = None) -> None:
     skip = ignore_top_lines if ignore_top_lines is not None else settings.ignore_top_lines
     try:
-        history = await changedetection.get_history(uuid)
-        timestamps = sorted(history.keys(), key=lambda x: int(x))
-
-        if not timestamps:
-            return
-
-        current_ts = timestamps[-1]
-        current_text = await changedetection.get_snapshot(uuid, current_ts)
-
-        # 마지막으로 처리한 스냅샷을 baseline으로 사용.
-        # 히스토리에 남아있으면 그 스냅샷을, 없으면 바로 이전 스냅샷을 사용.
         last_processed = db_get_last_processed(uuid)
-        baseline_ts = next(
-            (ts for ts in reversed(timestamps[:-1]) if int(ts) <= last_processed),
-            timestamps[-2] if len(timestamps) >= 2 else None,
-        )
-
-        if baseline_ts:
-            previous_text = await changedetection.get_snapshot(uuid, baseline_ts)
-            new_lines, removed_lines = extract_diff_lines(previous_text, current_text, skip)
-        else:
-            new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:30]
-            removed_lines = []
+        new_lines, removed_lines = await _get_diff(uuid, last_processed, skip)
 
         if not new_lines:
             db_mark_processed(uuid, last_changed)
@@ -181,28 +227,8 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
             db_mark_processed(uuid, last_changed)
             return
 
-        diff_text = "\n".join(new_lines)
-        saved_count = 0
-        for item in results:
-            found_title = item.get("title", "")
-            summary = item.get("summary", "")
-            if not found_title:
-                continue
-
-            with get_db() as conn:
-                exists = conn.execute(
-                    "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
-                    (uuid, found_title),
-                ).fetchone()
-            if exists:
-                logger.info(f"Duplicate alert skipped: [{found_title}]")
-                continue
-
-            analysis = {"title": found_title, "summary": summary}
-            db_save_alert(uuid, url, type_, analysis, diff_text, last_changed)
-            logger.info(f"Alert saved: [{found_title}] {url}")
-            saved_count += 1
-
+        results = dedup_by_prefix(results)
+        saved_count = _save_new_alerts(uuid, url, type_, results, "\n".join(new_lines), last_changed)
         db_mark_processed(uuid, last_changed)
         if saved_count == 0:
             logger.info(f"No new alerts for {url}")
@@ -223,7 +249,7 @@ async def poll_changes():
     with get_db() as conn:
         saved_watches = {
             r["uuid"]: dict(r)
-            for r in conn.execute("SELECT uuid, type, ignore_top_lines FROM watches").fetchall()
+            for r in conn.execute("SELECT uuid, type, ignore_top_lines, last_processed FROM watches").fetchall()
         }
 
     for uuid, data in watches.items():
@@ -233,10 +259,11 @@ async def poll_changes():
         saved = saved_watches.get(uuid, {})
         type_ = saved.get("type") or "content"
         ignore_top_lines = saved.get("ignore_top_lines")
+        last_processed = saved.get("last_processed") or 0
 
         db_upsert_watch(uuid, url, title, type_, last_changed)
 
-        if last_changed and last_changed > db_get_last_processed(uuid):
+        if last_changed and last_changed > last_processed:
             await process_watch(uuid, url, title, type_, last_changed, ignore_top_lines)
 
 

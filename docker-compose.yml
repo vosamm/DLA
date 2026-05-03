@@ -1,3 +1,5 @@
+name: noticeping
+
 services:
   playwright-chrome:
     image: dgtlmoon/sockpuppetbrowser:latest

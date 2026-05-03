@@ -77,7 +77,6 @@ http://localhost:8000 → **모니터 관리** 탭
 - **추가**: URL과 이름 입력 후 추가 버튼 (자동으로 5분 주기 감지 등록)
 - **이름 수정**: 목록에서 **수정** 버튼 클릭 → 인라인 편집
 - **삭제**: **삭제** 버튼 클릭
-- **changedetection.io 직접 접근**: 탭 우측 상단 `changedetection.io 열기 ↗` 링크 (http://localhost:5000)
 
 ### 알림 확인
 
@@ -99,18 +98,6 @@ http://localhost:8000 메인 화면
 | `market` | 중고거래, 쇼핑몰, 매물 | 텍스트 diff + 스크린샷 → Vision LLM |
 
 기본값은 `content`입니다. 타입 지정은 API로 가능합니다:
-
-```bash
-# 등록 시 타입 지정
-curl -X POST http://localhost:8000/api/watches/ \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "title": "중고나라", "type": "market"}'
-
-# 기존 모니터 타입 변경
-curl -X PUT http://localhost:8000/api/watches/<uuid> \
-  -H "Content-Type: application/json" \
-  -d '{"title": "중고나라", "type": "market"}'
-```
 
 ---
 

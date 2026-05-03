@@ -94,18 +94,18 @@ class OllamaClient:
         self.base_url = settings.ollama_url.rstrip("/")
         self.model = settings.ollama_model
 
-    async def analyze(self, new_lines: list[str]) -> list[dict]:
-        """새로 추가된 줄에서 제목과 요약을 모두 추출한다 (복수 반환)."""
-        formatted_lines = "\n".join(f"- {line}" for line in new_lines)
-        prompt = ANALYZE_PROMPT.format(new_lines=formatted_lines)
-
+    async def _call_llm(self, prompt: str, images: list[str] | None = None) -> list[dict]:
+        """공통 LLM 호출: payload 빌드 → httpx POST → JSON 파싱 → 항목 반환."""
         payload: dict = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
             "format": _ITEMS_SCHEMA,
         }
+        if images:
+            payload["images"] = images
 
+        raw = ""
         try:
             async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(f"{self.base_url}/api/generate", json=payload)
@@ -113,20 +113,25 @@ class OllamaClient:
                 data = resp.json()
 
             raw = data.get("response", "").strip()
-            logger.debug(f"Ollama analyze raw response: {raw[:500]}")
+            logger.debug(f"Ollama raw response: {raw[:500]}")
             result = json.loads(raw)
             return _parse_items(result)
 
         except json.JSONDecodeError:
-            logger.warning(f"Ollama returned non-JSON response for analyze: {raw[:200]}")
+            logger.warning(f"Ollama returned non-JSON response: {raw[:200]}")
             return []
         except httpx.TimeoutException:
-            logger.error("Ollama timeout during analyze")
+            logger.error("Ollama timeout")
             return []
         except Exception as e:
-            logger.error(f"Ollama analyze error: {type(e).__name__}: {e}")
+            logger.error(f"Ollama error: {type(e).__name__}: {e}")
             return []
 
+    async def analyze(self, new_lines: list[str]) -> list[dict]:
+        """새로 추가된 줄에서 제목과 요약을 모두 추출한다 (복수 반환)."""
+        formatted_lines = "\n".join(f"- {line}" for line in new_lines)
+        prompt = ANALYZE_PROMPT.format(new_lines=formatted_lines)
+        return await self._call_llm(prompt)
 
     async def analyze_market(self, new_lines: list[str], screenshot: bytes | None) -> list[dict]:
         """거래 사이트: 스크린샷 + 텍스트 diff를 Vision LLM으로 분석 (복수 반환)."""
@@ -136,36 +141,8 @@ class OllamaClient:
             if screenshot else ""
         )
         prompt = MARKET_ANALYZE_PROMPT.format(new_lines=formatted_lines, screenshot_hint=screenshot_hint)
-
-        payload: dict = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "format": _ITEMS_SCHEMA,
-        }
-        if screenshot:
-            payload["images"] = [base64.b64encode(screenshot).decode()]
-
-        try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                resp = await client.post(f"{self.base_url}/api/generate", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-
-            raw = data.get("response", "").strip()
-            logger.debug(f"Ollama analyze_market raw response: {raw[:500]}")
-            result = json.loads(raw)
-            return _parse_items(result)
-
-        except json.JSONDecodeError:
-            logger.warning(f"Ollama returned non-JSON response for analyze_market: {raw[:200]}")
-            return []
-        except httpx.TimeoutException:
-            logger.error("Ollama timeout during analyze_market")
-            return []
-        except Exception as e:
-            logger.error(f"Ollama analyze_market error: {type(e).__name__}: {e}")
-            return []
+        images = [base64.b64encode(screenshot).decode()] if screenshot else None
+        return await self._call_llm(prompt, images=images)
 
 
 ollama = OllamaClient()
