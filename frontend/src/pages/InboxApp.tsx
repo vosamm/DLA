@@ -183,13 +183,13 @@ function Sidebar({ scope, watches, alerts, onScope }: {
     [alerts]
   )
 
-  const contentWatches = useMemo(() => watches.filter(w => w.type === 'content'), [watches])
-  const marketWatches = useMemo(() => watches.filter(w => w.type === 'market'), [watches])
+  const contentWatches = watches.filter(w => w.type === 'content')
+  const marketWatches = watches.filter(w => w.type === 'market')
   const navProps = { activeScope: scope, onScope }
 
   return (
     <nav className="sidebar">
-      <NavItem id="all" label="전체 받은 편지함" icon={<Icons.Inbox />} count={totalUnread} {...navProps} />
+      <NavItem id="all" label="전체 받은 알림" icon={<Icons.Inbox />} count={totalUnread} {...navProps} />
       <NavItem id="unread" label="읽지 않음" icon={<Icons.Bell />} count={totalUnread} {...navProps} />
 
       {contentWatches.length > 0 && (
@@ -313,7 +313,7 @@ function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkA
   const watch = uuid ? watchMap.get(uuid) : undefined
   const title = scope === 'unread' ? '읽지 않음'
     : uuid ? (watch?.title || (watch ? hostOf(watch.url) : '알림'))
-    : '전체 받은 편지함'
+    : '전체 받은 알림'
   const scopeBadge = uuid ? typeLabel(watch?.type ?? 'content') : null
 
   return (
@@ -423,7 +423,11 @@ function VisualFilterModal({ uuid, title, onClose }: {
   const cdBase = `${window.location.protocol}//${window.location.hostname}:5000`
   const url = `${cdBase}/edit/${uuid}#visualselector`
 
-  useEscapeKey(onClose)
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   return (
     <div className="vf-overlay" onClick={onClose}>
@@ -662,6 +666,19 @@ export function InboxApp() {
   useEffect(() => {
     const id = setInterval(loadData, 30000)
     return () => clearInterval(id)
+  }, [loadData])
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+      if (e.key === 'r') loadData()
+      else if (e.key === '1') setScope('all')
+      else if (e.key === '2') setScope('unread')
+      else if (e.key === 'g') setScope('manage')
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
   }, [loadData])
 
   useEffect(() => {

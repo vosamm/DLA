@@ -90,6 +90,7 @@ _TRIVIAL_LINE_PATTERNS = [
     re.compile(r'^조회\s*\d+'),
     re.compile(r'^추천\s*\d+'),
     re.compile(r'^(hit|view|click)s?\s*:?\s*\d+', re.IGNORECASE),
+    re.compile(r'^\([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+[^\s)]*\)$'), 
 ]
 
 
