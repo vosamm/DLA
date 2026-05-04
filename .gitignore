@@ -17,3 +17,11 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend
+frontend/node_modules/
+app/static/assets/
+app/static/index.html
+
+# Archives
+*.zip

@@ -52,7 +52,9 @@ services:
     entrypoint: ["ollama", "pull", "gemma4:e2b"]
 
   app:
-    build: ./app
+    build:
+      context: .
+      dockerfile: app/Dockerfile
     container_name: noticeping-app
     ports:
       - "8000:8000"
@@ -63,7 +65,6 @@ services:
       - CHANGEDETECTION_API_KEY=${CHANGEDETECTION_API_KEY:-localkey123}
       - POLL_INTERVAL=${POLL_INTERVAL:-30}
     volumes:
-      - ./app:/app
       - ./data/app:/app/data
     depends_on:
       ollama:
