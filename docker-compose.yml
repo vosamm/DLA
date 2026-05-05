@@ -11,6 +11,16 @@ services:
       - SCREEN_WIDTH=1920
       - SCREEN_HEIGHT=1080
 
+  app-browser:
+    image: dgtlmoon/sockpuppetbrowser:latest
+    container_name: app-browser
+    cap_add:
+      - SYS_ADMIN
+    restart: unless-stopped
+    environment:
+      - SCREEN_WIDTH=1920
+      - SCREEN_HEIGHT=1080
+
   changedetection:
     image: ghcr.io/dgtlmoon/changedetection.io
     container_name: changedetection

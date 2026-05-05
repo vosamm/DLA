@@ -386,7 +386,7 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
                 <SiteChip type={alert.type} name={siteName} time={alert.changed_at} />
               </div>
               <div className="detail-header-actions">
-                <a href={alert.url} target="_blank" rel="noopener noreferrer" className="icon-btn" title="원문 보기">
+                <a href={alert.detail_url || alert.url} target="_blank" rel="noopener noreferrer" className="icon-btn" title="원문 보기">
                   <Icons.External />
                 </a>
                 <button className="icon-btn" title="닫기" onClick={onClose}><Icons.X /></button>
@@ -402,7 +402,7 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
               <button className="btn danger" onClick={() => { onDismiss(alert.id); onClose() }}>
                 <Icons.X /> 닫기
               </button>
-              <a href={alert.url} target="_blank" rel="noopener noreferrer" className="btn primary">
+              <a href={alert.detail_url || alert.url} target="_blank" rel="noopener noreferrer" className="btn primary">
                 <Icons.External /> 원문 보기
               </a>
             </div>
