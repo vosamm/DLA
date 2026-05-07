@@ -87,19 +87,6 @@ class ChangeDetectionClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_screenshot(self, uuid: str) -> bytes | None:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(
-                    f"{self.base_url}/api/v1/watch/{uuid}/screenshot",
-                    headers=self.headers,
-                )
-                if resp.status_code == 200:
-                    return resp.content
-        except Exception as e:
-            logger.debug(f"Screenshot fetch failed for {uuid}: {e}")
-        return None
-
     async def delete_watch(self, uuid: str) -> None:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.delete(

@@ -42,6 +42,7 @@ def init_db():
                 type TEXT NOT NULL,
                 analysis TEXT NOT NULL,
                 diff_text TEXT,
+                detail_url TEXT,
                 changed_at INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (watch_uuid) REFERENCES watches(uuid)
@@ -50,5 +51,9 @@ def init_db():
         # 마이그레이션: 기존 테이블에 컬럼 추가 (이미 있으면 무시)
         try:
             conn.execute("ALTER TABLE watches ADD COLUMN ignore_top_lines INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE alerts ADD COLUMN detail_url TEXT")
         except Exception:
             pass

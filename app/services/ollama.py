@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 
@@ -9,57 +8,30 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 ANALYZE_PROMPT = """\
-당신은 웹 페이지 변경 감지 시스템의 분류기입니다.
-아래는 웹 페이지에서 방금 새로 감지된 텍스트 줄 목록입니다:
+웹 페이지에서 새로 감지된 텍스트 줄 목록입니다:
 
 {new_lines}
 
-이 목록에서 실제로 새로 등록된 공지·게시글·뉴스 항목의 제목을 찾아내세요.
+실제 공지·게시글 제목만 추출하세요.
 
-판단 기준:
-- 선택해야 할 것: 독자에게 전달할 내용이 있는 실질적인 게시글 제목
-- 제외해야 할 것:
-  - 숫자·조회수·순위·날짜·시간만 바뀐 줄 (예: "3분 전", "조회 142")
-  - 추천수·점수 변경 (예: "1 point by helio", "3 points by user123")
-  - 댓글 수 변경 (예: "댓글 5개", "12 comments")
-  - 배너·팝업·광고·이벤트 홍보 문구
-  - 네비게이션·메뉴·버튼·UI 레이블 텍스트
-  - 의미 없는 짧은 단어, 기호, 빈 문자열
+제외:
+- 수치·날짜·조회수·추천수·댓글 수만 바뀐 줄
+- 부서명·날짜·번호 조합처럼 실제 제목이 없는 메타데이터
+- 광고·홍보·상업성 문구
+- UI 텍스트 (메뉴·버튼·배너 등)
 
-각 항목의 필드:
-1. "title": 목록에서 그대로 복사한 제목 텍스트 (절대 수정하지 마세요)
-2. "summary": 위 텍스트 목록에 있는 정보만 사용해 2~3문장 요약.
-   날짜, 마감일, 대상, 신청 방법 등이 보이면 반드시 포함하세요.
-   목록에 없는 정보는 절대 추가하지 마세요.
+예시:
+입력: ["교무과 2026-05-04 141", "조회 142", "2026 수시 일정 변경 안내"]
+출력: [{{"title": "2026 수시 일정 변경 안내", "summary": "2026 수시 일정이 변경되었습니다."}}]
 
-실질적인 새 게시글이 없으면 반드시 빈 배열 []을 반환하세요.
-JSON 배열 외에 다른 텍스트는 출력하지 마세요."""
+입력: ["교무과 2026-429", "추천 3", "공지사항"]
+출력: []
 
+각 항목:
+- "title": 목록에서 그대로 복사 (수정 금지)
+- "summary": 목록 내 정보만으로 2~3문장. 날짜·마감일·대상·신청 방법 포함. 없는 정보 추가 금지.
 
-MARKET_ANALYZE_PROMPT = """\
-당신은 중고거래·부동산 등 거래 플랫폼의 신규 매물 감지기입니다.
-아래는 웹 페이지에서 방금 새로 감지된 텍스트 줄 목록입니다:
-
-{new_lines}
-{screenshot_hint}
-새로 등록된 매물·상품·거래 게시글 제목을 모두 찾아내세요.
-
-판단 기준:
-- 선택해야 할 것: 실제 판매/구매/임대 목적의 게시글 제목
-- 제외해야 할 것:
-  - 숫자·조회수·순위·가격·시간 정보만 바뀐 줄
-  - 광고 배너, 이벤트 홍보 문구, 공지 팝업
-  - 네비게이션·메뉴·버튼·UI 레이블 텍스트
-  - 실제 거래 게시글이 아닌 경우
-
-각 항목의 필드:
-1. "title": 목록에서 그대로 복사한 제목 텍스트 (절대 수정하지 마세요)
-2. "summary": 위 텍스트 목록과 스크린샷에서 확인된 정보만 사용해 2~3문장 요약.
-   가격, 상태(새상품/중고), 거래 방식(직거래/택배), 위치가 보이면 반드시 포함하세요.
-   확인되지 않은 정보는 절대 추가하지 말것. 스크린샷을 언급하지 말것.
-
-실제 거래 게시글이 없으면 반드시 빈 배열 []을 반환하세요.
-JSON 배열 외에 다른 텍스트는 출력하지 마세요."""
+새 게시글이 없으면 [] 반환. JSON 외 출력 금지."""
 
 
 # Ollama structured output schema — 배열 형태 강제
@@ -94,16 +66,15 @@ class OllamaClient:
         self.base_url = settings.ollama_url.rstrip("/")
         self.model = settings.ollama_model
 
-    async def _call_llm(self, prompt: str, images: list[str] | None = None) -> list[dict]:
+    async def _call_llm(self, prompt: str) -> list[dict]:
         """공통 LLM 호출: payload 빌드 → httpx POST → JSON 파싱 → 항목 반환."""
         payload: dict = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
             "format": _ITEMS_SCHEMA,
+            "options": {"temperature": 0.1},
         }
-        if images:
-            payload["images"] = images
 
         raw = ""
         try:
@@ -132,17 +103,6 @@ class OllamaClient:
         formatted_lines = "\n".join(f"- {line}" for line in new_lines)
         prompt = ANALYZE_PROMPT.format(new_lines=formatted_lines)
         return await self._call_llm(prompt)
-
-    async def analyze_market(self, new_lines: list[str], screenshot: bytes | None) -> list[dict]:
-        """거래 사이트: 스크린샷 + 텍스트 diff를 Vision LLM으로 분석 (복수 반환)."""
-        formatted_lines = "\n".join(f"- {line}" for line in new_lines)
-        screenshot_hint = (
-            "첨부된 스크린샷도 함께 참고하여 텍스트에서 보이지 않는 가격·이미지 정보를 보완하세요.\n"
-            if screenshot else ""
-        )
-        prompt = MARKET_ANALYZE_PROMPT.format(new_lines=formatted_lines, screenshot_hint=screenshot_hint)
-        images = [base64.b64encode(screenshot).decode()] if screenshot else None
-        return await self._call_llm(prompt, images=images)
 
 
 ollama = OllamaClient()

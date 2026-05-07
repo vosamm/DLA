@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     poll_interval: int = 30  # seconds
     database_path: str = "/app/data/noticeping.db"
     ignore_top_lines: int = 10  # 텍스트 상위 N줄 변경 무시 (헤더·배너 노이즈 방지)
+    max_diff_lines: int = 30          # diff 최대 줄 수 (초과분 무시)
 
     class Config:
         env_file = ".env"

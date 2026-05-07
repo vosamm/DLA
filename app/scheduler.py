@@ -53,14 +53,15 @@ def db_save_alert(
     analysis: dict,
     diff_text: str,
     changed_at: int,
+    detail_url: str | None = None,
 ):
     with get_db() as conn:
         conn.execute(
             """
-            INSERT INTO alerts (watch_uuid, url, type, analysis, diff_text, changed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO alerts (watch_uuid, url, type, analysis, diff_text, detail_url, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (watch_uuid, url, type_, json.dumps(analysis, ensure_ascii=False), diff_text, changed_at),
+            (watch_uuid, url, type_, json.dumps(analysis, ensure_ascii=False), diff_text, detail_url, changed_at),
         )
 
 
@@ -86,11 +87,9 @@ def extract_diff_lines(previous: str, current: str, skip: int) -> tuple[list[str
 
 
 _TRIVIAL_LINE_PATTERNS = [
-    re.compile(r'^\d+\s+points?\s+by\s+\S+', re.IGNORECASE),  # "N point(s) by username ..."
     re.compile(r'^조회\s*\d+'),
     re.compile(r'^추천\s*\d+'),
     re.compile(r'^(hit|view|click)s?\s*:?\s*\d+', re.IGNORECASE),
-    re.compile(r'^\([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+[^\s)]*\)$'), 
 ]
 
 
@@ -114,15 +113,6 @@ def is_trivial_change(new_lines: list[str], removed_lines: list[str]) -> bool:
     return stripped_new == stripped_removed and any(s for s in stripped_new)
 
 
-# 상업성 키워드 (광고/스팸 사전 필터)
-_AD_KEYWORDS = [
-    "공장직영", "후불결제", "후불 결제",
-    "24시간배송", "24시간 배송", "페카매입", "당일배송", "무료배송",
-    "공장가", "도매가", "특가판매", "할인쿠폰", "최저가보장",
-    "구매문의", "판매문의", "재고문의", "A/S문의",
-]
-
-
 def dedup_by_prefix(items: list[dict], min_prefix: int = 15) -> list[dict]:
     """같은 기사의 제목과 발췌가 중복 감지되지 않도록 공통 접두사 기반 중복 제거."""
     unique: list[dict] = []
@@ -144,13 +134,6 @@ def dedup_by_prefix(items: list[dict], min_prefix: int = 15) -> list[dict]:
     return unique
 
 
-def is_commercial_spam(new_lines: list[str]) -> bool:
-    """상업성 키워드가 2개 이상 포함된 경우 광고/스팸으로 판단."""
-    combined = " ".join(new_lines)
-    hit_count = sum(1 for kw in _AD_KEYWORDS if kw in combined)
-    return hit_count >= 2
-
-
 # ── 변경 처리 ─────────────────────────────────────────────────────────────────
 async def _get_diff(uuid: str, last_processed: int, skip: int) -> tuple[list[str], list[str]]:
     """현재 스냅샷과 baseline의 diff 라인을 반환."""
@@ -167,9 +150,10 @@ async def _get_diff(uuid: str, last_processed: int, skip: int) -> tuple[list[str
 
     if baseline_ts:
         previous_text = await changedetection.get_snapshot(uuid, baseline_ts)
-        return extract_diff_lines(previous_text, current_text, skip)
+        new_lines, removed_lines = extract_diff_lines(previous_text, current_text, skip)
+        return new_lines[:settings.max_diff_lines], removed_lines
     else:
-        new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:30]
+        new_lines = [l.strip() for l in current_text.splitlines()[skip:] if l.strip()][:settings.max_diff_lines]
         return new_lines, []
 
 
@@ -178,21 +162,25 @@ def _save_new_alerts(
     results: list[dict], diff_text: str, last_changed: int,
 ) -> int:
     """중복 확인 후 새 알림 저장. 저장된 수 반환."""
+    items = [item for item in results if item.get("title", "")]
+    if not items:
+        return 0
+
+    with get_db() as conn:
+        existing_titles = {
+            row[0] for row in conn.execute(
+                "SELECT json_extract(analysis, '$.title') FROM alerts WHERE watch_uuid = ?",
+                (uuid,),
+            ).fetchall()
+        }
+
     saved_count = 0
-    for item in results:
-        found_title = item.get("title", "")
-        summary = item.get("summary", "")
-        if not found_title:
-            continue
-        with get_db() as conn:
-            exists = conn.execute(
-                "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
-                (uuid, found_title),
-            ).fetchone()
-        if exists:
+    for item in items:
+        found_title = item["title"]
+        if found_title in existing_titles:
             logger.info(f"Duplicate alert skipped: [{found_title}]")
             continue
-        db_save_alert(uuid, url, type_, {"title": found_title, "summary": summary}, diff_text, last_changed)
+        db_save_alert(uuid, url, type_, {"title": found_title, "summary": item.get("summary", "")}, diff_text, last_changed, item.get("detail_url"))
         logger.info(f"Alert saved: [{found_title}] {url}")
         saved_count += 1
     return saved_count
@@ -213,22 +201,14 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
             db_mark_processed(uuid, last_changed)
             return
 
-        # LLM 분석: market 타입은 Vision, content 타입은 텍스트
-        if type_ == "market":
-            screenshot = await changedetection.get_screenshot(uuid)
-            results = await ollama.analyze_market(new_lines, screenshot)
-        else:
-            if is_commercial_spam(new_lines):
-                logger.info(f"Commercial spam detected, skipping: {url}")
-                db_mark_processed(uuid, last_changed)
-                return
-            results = await ollama.analyze(new_lines)
+        results = await ollama.analyze(new_lines)
 
         if not results:
             db_mark_processed(uuid, last_changed)
             return
 
         results = dedup_by_prefix(results)
+
         saved_count = _save_new_alerts(uuid, url, type_, results, "\n".join(new_lines), last_changed)
         db_mark_processed(uuid, last_changed)
         if saved_count == 0:
