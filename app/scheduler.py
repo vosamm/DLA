@@ -250,7 +250,7 @@ async def poll_changes():
 
 def start_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(poll_changes, "interval", seconds=settings.poll_interval)
+    scheduler.add_job(poll_changes, "interval", seconds=settings.poll_interval, max_instances=3, coalesce=True)
     scheduler.start()
     logger.info(f"Scheduler started (interval: {settings.poll_interval}s)")
     return scheduler
