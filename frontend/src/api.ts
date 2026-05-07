@@ -15,7 +15,7 @@ export async function fetchWatches(): Promise<Watch[]> {
   return res.json()
 }
 
-export async function createWatch(body: { url: string; title: string; type: 'content' | 'market' }) {
+export async function createWatch(body: { url: string; title: string }) {
   const res = await fetch('/api/watches/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -27,7 +27,7 @@ export async function createWatch(body: { url: string; title: string; type: 'con
 
 export async function updateWatch(
   uuid: string,
-  body: { title?: string; type?: 'content' | 'market'; ignore_top_lines?: number | null }
+  body: { title?: string; ignore_top_lines?: number | null }
 ) {
   const res = await fetch(`/api/watches/${uuid}`, {
     method: 'PUT',

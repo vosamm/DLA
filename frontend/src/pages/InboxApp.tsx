@@ -461,11 +461,9 @@ function ManagePanel({ watches, onReload, onToast }: {
 }) {
   const [addUrl, setAddUrl] = useState('')
   const [addTitle, setAddTitle] = useState('')
-  const [addType, setAddType] = useState<'content' | 'market'>('content')
   const [adding, setAdding] = useState(false)
   const [editingUuid, setEditingUuid] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
-  const [editType, setEditType] = useState<'content' | 'market'>('content')
   const [editIgnore, setEditIgnore] = useState('')
   const [filterWatch, setFilterWatch] = useState<Watch | null>(null)
 
@@ -474,10 +472,9 @@ function ManagePanel({ watches, onReload, onToast }: {
     if (!addUrl.trim()) return
     setAdding(true)
     try {
-      await createWatch({ url: addUrl.trim(), title: addTitle.trim() || addUrl.trim(), type: addType })
+      await createWatch({ url: addUrl.trim(), title: addTitle.trim() || addUrl.trim() })
       setAddUrl('')
       setAddTitle('')
-      setAddType('content')
       onReload()
       onToast('모니터가 추가되었습니다.')
     } catch (err) {
@@ -490,7 +487,6 @@ function ManagePanel({ watches, onReload, onToast }: {
   function startEdit(w: Watch) {
     setEditingUuid(w.uuid)
     setEditTitle(w.title)
-    setEditType(w.type)
     setEditIgnore(w.ignore_top_lines !== null ? String(w.ignore_top_lines) : '')
   }
 
@@ -498,7 +494,6 @@ function ManagePanel({ watches, onReload, onToast }: {
     try {
       await updateWatch(uuid, {
         title: editTitle,
-        type: editType,
         ignore_top_lines: editIgnore !== '' ? Number(editIgnore) : null,
       })
       setEditingUuid(null)
@@ -537,13 +532,6 @@ function ManagePanel({ watches, onReload, onToast }: {
           <div className="field">
             <label>이름 (선택)</label>
             <input type="text" placeholder="사이트 이름" value={addTitle} onChange={e => setAddTitle(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>유형</label>
-            <select value={addType} onChange={e => setAddType(e.target.value as 'content' | 'market')}>
-              <option value="content">공지 · 뉴스</option>
-              <option value="market">거래 · 상품</option>
-            </select>
           </div>
           <button className="btn primary" type="submit" disabled={adding}>
             <Icons.Plus /> 추가
@@ -587,13 +575,6 @@ function ManagePanel({ watches, onReload, onToast }: {
                   <div className="field">
                     <label>이름</label>
                     <input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>유형</label>
-                    <select value={editType} onChange={e => setEditType(e.target.value as 'content' | 'market')}>
-                      <option value="content">공지 · 뉴스</option>
-                      <option value="market">거래 · 상품</option>
-                    </select>
                   </div>
                   <div className="field">
                     <label>상단 무시 줄 수</label>

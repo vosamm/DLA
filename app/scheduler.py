@@ -1,3 +1,4 @@
+import asyncio
 import difflib
 import json
 import logging
@@ -163,22 +164,25 @@ def _save_new_alerts(
     results: list[dict], diff_text: str, last_changed: int,
 ) -> int:
     """중복 확인 후 새 알림 저장. 저장된 수 반환."""
+    items = [item for item in results if item.get("title", "")]
+    if not items:
+        return 0
+
+    with get_db() as conn:
+        existing_titles = {
+            row[0] for row in conn.execute(
+                "SELECT json_extract(analysis, '$.title') FROM alerts WHERE watch_uuid = ?",
+                (uuid,),
+            ).fetchall()
+        }
+
     saved_count = 0
-    for item in results:
-        found_title = item.get("title", "")
-        summary = item.get("summary", "")
-        detail_url = item.get("detail_url")
-        if not found_title:
-            continue
-        with get_db() as conn:
-            exists = conn.execute(
-                "SELECT 1 FROM alerts WHERE watch_uuid = ? AND json_extract(analysis, '$.title') = ?",
-                (uuid, found_title),
-            ).fetchone()
-        if exists:
+    for item in items:
+        found_title = item["title"]
+        if found_title in existing_titles:
             logger.info(f"Duplicate alert skipped: [{found_title}]")
             continue
-        db_save_alert(uuid, url, type_, {"title": found_title, "summary": summary}, diff_text, last_changed, detail_url)
+        db_save_alert(uuid, url, type_, {"title": found_title, "summary": item.get("summary", "")}, diff_text, last_changed, item.get("detail_url"))
         logger.info(f"Alert saved: [{found_title}] {url}")
         saved_count += 1
     return saved_count
@@ -199,12 +203,7 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
             db_mark_processed(uuid, last_changed)
             return
 
-        # LLM 분석: market 타입은 Vision, content 타입은 텍스트
-        if type_ == "market":
-            screenshot = await changedetection.get_screenshot(uuid)
-            results = await ollama.analyze_market(new_lines, screenshot)
-        else:
-            results = await ollama.analyze(new_lines)
+        results = await ollama.analyze(new_lines)
 
         if not results:
             db_mark_processed(uuid, last_changed)
@@ -212,16 +211,21 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
 
         results = dedup_by_prefix(results)
 
-        # ── detail 보강: 상위 N개 alert만 상세 페이지 fetch 후 summary 교체 ──
+        # ── detail 보강: 상위 N개 alert만 상세 페이지 병렬 fetch 후 summary 교체 ──
+        fetch_limit = settings.detail_fetch_max_alerts
+        fetch_results = await asyncio.gather(
+            *[browser_service.get_detail_content(url, item.get("title", "")) for item in results[:fetch_limit]],
+            return_exceptions=True,
+        )
         enriched = []
         for i, item in enumerate(results):
             title = item.get("title", "")
             summary = item.get("summary", "")
             detail_url = None
-            if i < settings.detail_fetch_max_alerts:
-                result = await browser_service.get_detail_content(url, title)
-                if result:
-                    detail_text, detail_url = result
+            if i < fetch_limit:
+                fetch_result = fetch_results[i]
+                if isinstance(fetch_result, tuple):
+                    detail_text, detail_url = fetch_result
                     better_summary = await ollama.summarize(title, detail_text)
                     if better_summary:
                         summary = better_summary

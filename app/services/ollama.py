@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 
@@ -45,25 +44,6 @@ SUMMARIZE_PROMPT = """\
 본문에 없는 정보 추가 금지. 요약문만 출력하세요."""
 
 
-MARKET_ANALYZE_PROMPT = """\
-거래 플랫폼에서 새로 감지된 텍스트 줄 목록입니다:
-
-{new_lines}
-{screenshot_hint}
-새로 등록된 매물·상품 게시글 제목만 추출하세요.
-
-제외:
-- 수치·가격·조회수만 바뀐 줄
-- 광고·이벤트·공지 팝업
-- UI 텍스트 (메뉴·버튼 등)
-
-각 항목:
-- "title": 목록에서 그대로 복사 (수정 금지)
-- "summary": 가격·상태·거래 방식·위치 등 확인된 정보만 2~3문장. 없는 정보 추가 금지. 스크린샷 언급 금지.
-
-새 게시글이 없으면 [] 반환. JSON 외 출력 금지."""
-
-
 # Ollama structured output schema — 배열 형태 강제
 _ITEMS_SCHEMA = {
     "type": "array",
@@ -96,7 +76,7 @@ class OllamaClient:
         self.base_url = settings.ollama_url.rstrip("/")
         self.model = settings.ollama_model
 
-    async def _call_llm(self, prompt: str, images: list[str] | None = None) -> list[dict]:
+    async def _call_llm(self, prompt: str) -> list[dict]:
         """공통 LLM 호출: payload 빌드 → httpx POST → JSON 파싱 → 항목 반환."""
         payload: dict = {
             "model": self.model,
@@ -105,8 +85,6 @@ class OllamaClient:
             "format": _ITEMS_SCHEMA,
             "options": {"temperature": 0.1},
         }
-        if images:
-            payload["images"] = images
 
         raw = ""
         try:
@@ -150,17 +128,6 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Ollama summarize error: {e}")
             return ""
-
-    async def analyze_market(self, new_lines: list[str], screenshot: bytes | None) -> list[dict]:
-        """거래 사이트: 스크린샷 + 텍스트 diff를 Vision LLM으로 분석 (복수 반환)."""
-        formatted_lines = "\n".join(f"- {line}" for line in new_lines)
-        screenshot_hint = (
-            "첨부된 스크린샷도 함께 참고하여 텍스트에서 보이지 않는 가격·이미지 정보를 보완하세요.\n"
-            if screenshot else ""
-        )
-        prompt = MARKET_ANALYZE_PROMPT.format(new_lines=formatted_lines, screenshot_hint=screenshot_hint)
-        images = [base64.b64encode(screenshot).decode()] if screenshot else None
-        return await self._call_llm(prompt, images=images)
 
 
 ollama = OllamaClient()

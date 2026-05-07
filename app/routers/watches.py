@@ -10,13 +10,12 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 class WatchCreate(BaseModel):
     url: str
     title: str = ""
-    type: str = "content"  # "content" | "market"
+    type: str = "content"
     ignore_top_lines: int | None = None
 
 
 class WatchUpdate(BaseModel):
     title: str | None = None
-    type: str | None = None
     ignore_top_lines: int | None = None
 
 
@@ -78,9 +77,6 @@ async def update_watch(uuid: str, body: WatchUpdate):
         if "title" in body.model_fields_set:
             updates.append("title = ?")
             params.append(body.title)
-        if "type" in body.model_fields_set:
-            updates.append("type = ?")
-            params.append(body.type)
         if "ignore_top_lines" in body.model_fields_set:
             updates.append("ignore_top_lines = ?")
             params.append(body.ignore_top_lines)
