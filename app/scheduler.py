@@ -1,4 +1,3 @@
-import asyncio
 import difflib
 import json
 import logging
@@ -8,7 +7,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import settings
 from database import get_db
-from services.browser import browser_service
 from services.changedetection import changedetection
 from services.ollama import ollama
 
@@ -210,28 +208,6 @@ async def process_watch(uuid: str, url: str, title: str, type_: str, last_change
             return
 
         results = dedup_by_prefix(results)
-
-        # ── detail 보강: 상위 N개 alert만 상세 페이지 병렬 fetch 후 summary 교체 ──
-        fetch_limit = settings.detail_fetch_max_alerts
-        fetch_results = await asyncio.gather(
-            *[browser_service.get_detail_content(url, item.get("title", "")) for item in results[:fetch_limit]],
-            return_exceptions=True,
-        )
-        enriched = []
-        for i, item in enumerate(results):
-            title = item.get("title", "")
-            summary = item.get("summary", "")
-            detail_url = None
-            if i < fetch_limit:
-                fetch_result = fetch_results[i]
-                if isinstance(fetch_result, tuple):
-                    detail_text, detail_url = fetch_result
-                    better_summary = await ollama.summarize(title, detail_text)
-                    if better_summary:
-                        summary = better_summary
-                        logger.info(f"Detail summary enriched: [{title}] {detail_url}")
-            enriched.append({"title": title, "summary": summary, "detail_url": detail_url})
-        results = enriched
 
         saved_count = _save_new_alerts(uuid, url, type_, results, "\n".join(new_lines), last_changed)
         db_mark_processed(uuid, last_changed)

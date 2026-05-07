@@ -34,16 +34,6 @@ ANALYZE_PROMPT = """\
 새 게시글이 없으면 [] 반환. JSON 외 출력 금지."""
 
 
-SUMMARIZE_PROMPT = """\
-아래는 "{title}" 관련 페이지 본문입니다:
-
-{body}
-
-3~5문장으로 요약하세요.
-날짜·마감일·대상·신청 방법·주요 변경사항이 있으면 반드시 포함하세요.
-본문에 없는 정보 추가 금지. 요약문만 출력하세요."""
-
-
 # Ollama structured output schema — 배열 형태 강제
 _ITEMS_SCHEMA = {
     "type": "array",
@@ -113,21 +103,6 @@ class OllamaClient:
         formatted_lines = "\n".join(f"- {line}" for line in new_lines)
         prompt = ANALYZE_PROMPT.format(new_lines=formatted_lines)
         return await self._call_llm(prompt)
-
-    async def summarize(self, title: str, body: str) -> str:
-        """상세 페이지 본문을 받아 요약문을 반환한다. 실패 시 빈 문자열."""
-        prompt = SUMMARIZE_PROMPT.format(title=title, body=body[:3_000])
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={"model": self.model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1}},
-                )
-                resp.raise_for_status()
-                return resp.json().get("response", "").strip()
-        except Exception as e:
-            logger.error(f"Ollama summarize error: {e}")
-            return ""
 
 
 ollama = OllamaClient()
