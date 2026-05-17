@@ -19,3 +19,10 @@ export function addReadAll(ids: number[]) {
   for (const id of ids) s.add(id)
   save(READ_KEY, s)
 }
+
+export function pruneStale(validIds: Set<number>) {
+  const r = load(READ_KEY)
+  const d = load(DISMISSED_KEY)
+  save(READ_KEY, new Set([...r].filter(id => validIds.has(id))))
+  save(DISMISSED_KEY, new Set([...d].filter(id => validIds.has(id))))
+}

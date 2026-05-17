@@ -1,8 +1,12 @@
+import logging
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -29,9 +33,6 @@ def init_db():
                 url TEXT NOT NULL,
                 title TEXT,
                 type TEXT DEFAULT 'content',
-                last_changed INTEGER DEFAULT 0,
-                last_processed INTEGER DEFAULT 0,
-                ignore_top_lines INTEGER DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -41,19 +42,20 @@ def init_db():
                 url TEXT NOT NULL,
                 type TEXT NOT NULL,
                 analysis TEXT NOT NULL,
-                diff_text TEXT,
-                detail_url TEXT,
                 changed_at INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (watch_uuid) REFERENCES watches(uuid)
             );
         """)
         # 마이그레이션: 기존 테이블에 컬럼 추가 (이미 있으면 무시)
-        try:
-            conn.execute("ALTER TABLE watches ADD COLUMN ignore_top_lines INTEGER DEFAULT NULL")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE alerts ADD COLUMN detail_url TEXT")
-        except Exception:
-            pass
+        for stmt in [
+            "ALTER TABLE watches ADD COLUMN css_selector TEXT",
+            "ALTER TABLE watches ADD COLUMN crawl_interval_hours INTEGER DEFAULT 12",
+            "ALTER TABLE watches ADD COLUMN last_crawled INTEGER DEFAULT 0",
+            "ALTER TABLE watches ADD COLUMN next_page_selector TEXT",
+            "ALTER TABLE watches ADD COLUMN known_titles TEXT",
+        ]:
+            try:
+                conn.execute(stmt)
+            except Exception as e:
+                logger.debug(f"Migration skipped ({stmt.split()[2]}): {e}")

@@ -11,7 +11,8 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install chromium --with-deps
 COPY app/ .
 COPY --from=frontend /app/static ./static
 RUN mkdir -p /app/data

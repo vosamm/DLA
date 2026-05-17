@@ -1,9 +1,9 @@
 import json
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from database import get_db
-from services.changedetection import changedetection
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -34,12 +34,15 @@ async def list_alerts(watch_uuid: str | None = None, limit: int = 200):
     return [_parse_alert_row(r) for r in rows]
 
 
-@router.get("/stats")
-async def get_stats():
-    try:
-        cd_watches = await changedetection.list_watches()
-        watch_count = len(cd_watches)
-    except Exception:
-        watch_count = 0
+class DeleteAlertsRequest(BaseModel):
+    ids: list[int]
 
-    return {"total_watches": watch_count}
+
+@router.delete("/")
+async def delete_alerts(body: DeleteAlertsRequest):
+    if not body.ids:
+        return {"ok": True, "deleted": 0}
+    placeholders = ",".join("?" * len(body.ids))
+    with get_db() as conn:
+        conn.execute(f"DELETE FROM alerts WHERE id IN ({placeholders})", body.ids)
+    return {"ok": True, "deleted": len(body.ids)}

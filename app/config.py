@@ -2,14 +2,11 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    ollama_url: str = "http://ollama:11434"
-    ollama_model: str = "gemma4:e2b"
-    changedetection_url: str = "http://changedetection:5000"
-    changedetection_api_key: str = "localkey123"
-    poll_interval: int = 30  # seconds
+    ai_api_key: str = ""
+    ai_api_base: str = "https://factchat-cloud.mindlogic.ai/v1/gateway"
+    ai_model: str = "gpt-5.4-mini"
+    poll_interval: int = 60  # seconds — 크롤 체크 주기
     database_path: str = "/app/data/noticeping.db"
-    ignore_top_lines: int = 10  # 텍스트 상위 N줄 변경 무시 (헤더·배너 노이즈 방지)
-    max_diff_lines: int = 30          # diff 최대 줄 수 (초과분 무시)
 
     class Config:
         env_file = ".env"

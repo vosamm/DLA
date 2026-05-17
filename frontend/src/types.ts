@@ -4,7 +4,6 @@ export interface Alert {
   url: string
   type: 'content' | 'market'
   analysis: { title?: string; summary?: string }
-  detail_url: string | null
   changed_at: number
   // client-side state
   read: boolean
@@ -16,8 +15,10 @@ export interface Watch {
   url: string
   title: string
   type: 'content' | 'market'
-  ignore_top_lines: number | null
-  last_changed: number | null
+  css_selector: string | null
+  next_page_selector: string | null
+  last_crawled: number
+  crawl_interval_hours: number
 }
 
 export interface Toast {

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { Alert, Watch, Toast } from '../types'
 import { Icons } from '../icons'
-import { fetchAlerts, fetchWatches, createWatch, updateWatch, deleteWatch } from '../api'
-import { getRead, addRead, addReadAll, getDismissed, addDismissed } from '../storage'
+import { fetchAlerts, fetchWatches, createWatch, updateWatch, deleteWatch, getElementMap, triggerCrawl, analyzeRegion, navigateElementMap, deleteAlerts } from '../api'
+import { getRead, addRead, addReadAll, getDismissed, addDismissed, pruneStale } from '../storage'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -279,7 +279,7 @@ function AlertRow({ alert, watchMap, onOpen, onDismiss, onMarkRead }: {
 
 // ─── Inbox ───────────────────────────────────────────────────────────────────
 
-function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkAllRead }: {
+function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkAllRead, onDeleteRead }: {
   alerts: Alert[]
   watchMap: Map<string, Watch>
   scope: string
@@ -287,6 +287,7 @@ function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkA
   onDismiss: (id: number) => void
   onMarkRead: (id: number) => void
   onMarkAllRead: () => void
+  onDeleteRead: () => void
 }) {
   const uuid = scopeWatchUuid(scope)
 
@@ -309,6 +310,7 @@ function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkA
   }, [filtered])
 
   const unreadCount = useMemo(() => filtered.filter(a => !a.read).length, [filtered])
+  const readCount = useMemo(() => filtered.filter(a => a.read).length, [filtered])
 
   const watch = uuid ? watchMap.get(uuid) : undefined
   const title = scope === 'unread' ? '읽지 않음'
@@ -323,11 +325,18 @@ function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkA
           {title}
           {scopeBadge && <span className="scope-badge">{scopeBadge}</span>}
         </div>
-        {unreadCount > 0 && (
+        {(unreadCount > 0 || readCount > 0) && (
           <div className="main-actions">
-            <button className="btn ghost" onClick={onMarkAllRead}>
-              <Icons.CheckAll /> 모두 읽음
-            </button>
+            {unreadCount > 0 && (
+              <button className="btn ghost" onClick={onMarkAllRead}>
+                <Icons.CheckAll /> 모두 읽음
+              </button>
+            )}
+            {readCount > 0 && (
+              <button className="btn ghost" onClick={onDeleteRead}>
+                <Icons.Trash /> 읽은 알림 삭제
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -386,9 +395,6 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
                 <SiteChip type={alert.type} name={siteName} time={alert.changed_at} />
               </div>
               <div className="detail-header-actions">
-                <a href={alert.detail_url || alert.url} target="_blank" rel="noopener noreferrer" className="icon-btn" title="원문 보기">
-                  <Icons.External />
-                </a>
                 <button className="icon-btn" title="닫기" onClick={onClose}><Icons.X /></button>
               </div>
             </div>
@@ -402,9 +408,6 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
               <button className="btn danger" onClick={() => { onDismiss(alert.id); onClose() }}>
                 <Icons.X /> 닫기
               </button>
-              <a href={alert.detail_url || alert.url} target="_blank" rel="noopener noreferrer" className="btn primary">
-                <Icons.External /> 원문 보기
-              </a>
             </div>
           </>
         )}
@@ -413,40 +416,207 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
   )
 }
 
-// ─── VisualFilterModal ───────────────────────────────────────────────────────
+// ─── SelectorModal ───────────────────────────────────────────────────────────
 
-function VisualFilterModal({ uuid, title, onClose }: {
+type ElementInfo = {
+  selector: string
+  bbox: { x: number; y: number; w: number; h: number }
+  text: string
+}
+
+type MapData = { image: string; pageHeight: number; viewportWidth: number; elements: ElementInfo[] }
+type SelectorResult = { contentSel: string | null; nextSel: string | null; titles: string[] }
+
+function SelectorModal({ uuid, title, css_selector, onClose }: {
   uuid: string
   title: string
+  css_selector: Watch['css_selector']
   onClose: () => void
 }) {
-  const cdBase = `${window.location.protocol}//${window.location.hostname}:5000`
-  const url = `${cdBase}/edit/${uuid}#visualselector`
+
+  const [phase, setPhase] = useState<'loading' | 'picking' | 'analyzing' | 'done'>('loading')
+  const [mapData, setMapData] = useState<MapData | null>(null)
+  const [hoveredEl, setHoveredEl] = useState<ElementInfo | null>(null)
+  const [result, setResult] = useState<SelectorResult | null>(null)
+  const [error, setError] = useState('')
+  const [currentUrl, setCurrentUrl] = useState('')
+  const [navigating, setNavigating] = useState(false)
+
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  useEscapeKey(onClose)
 
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+    setPhase('loading')
+    setCurrentUrl('')
+    getElementMap(uuid)
+      .then(res => {
+        setMapData({
+          image: res.image,
+          pageHeight: res.page_height || 1,
+          viewportWidth: res.viewport_width || 1280,
+          elements: res.elements,
+        })
+        setPhase('picking')
+      })
+      .catch(err => { setError(errMsg(err)); setPhase('picking') })
+  }, [uuid])
+
+  function getScale() {
+    if (!imgRef.current || !mapData) return { sx: 1, sy: 1 }
+    const r = imgRef.current.getBoundingClientRect()
+    return { sx: r.width / mapData.viewportWidth, sy: r.height / mapData.pageHeight }
+  }
+
+  function findElAt(clientX: number, clientY: number): ElementInfo | null {
+    if (!imgRef.current || !mapData) return null
+    const r = imgRef.current.getBoundingClientRect()
+    const { sx, sy } = getScale()
+    const px = (clientX - r.left) / sx
+    const py = (clientY - r.top) / sy
+    let best: ElementInfo | null = null
+    let bestArea = Infinity
+    for (const el of mapData.elements) {
+      const { x, y, w, h } = el.bbox
+      if (px >= x && px <= x + w && py >= y && py <= y + h) {
+        const area = w * h
+        if (area < bestArea) { best = el; bestArea = area }
+      }
+    }
+    return best
+  }
+
+  function bboxStyle(bbox: ElementInfo['bbox']) {
+    const { sx, sy } = getScale()
+    return { left: bbox.x * sx, top: bbox.y * sy, width: bbox.w * sx, height: bbox.h * sy }
+  }
+
+  async function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (phase !== 'picking' || !mapData) return
+    const el = findElAt(e.clientX, e.clientY)
+    if (!el) return
+    setPhase('analyzing')
+    setError('')
+    try {
+      const { x, y, w, h } = el.bbox
+      const res = await analyzeRegion(
+        uuid,
+        { x1: x, y1: y, x2: x + w, y2: y + h, page_height: mapData.pageHeight, viewport_width: mapData.viewportWidth },
+        mapData.elements,
+      )
+      setResult({ contentSel: res.css_selector, nextSel: res.next_page_selector, titles: res.titles })
+      if (res.error) setError(`AI 오류: ${res.error}`)
+      setPhase('done')
+    } catch (err) {
+      setError(errMsg(err))
+      setPhase('picking')
+    }
+  }
+
+  async function handleNavigate() {
+    if (!result?.nextSel) return
+    setNavigating(true)
+    setError('')
+    try {
+      const res = await navigateElementMap(uuid, currentUrl, result.nextSel)
+      setMapData({
+        image: res.image,
+        pageHeight: res.page_height || 1,
+        viewportWidth: res.viewport_width || 1280,
+        elements: res.elements,
+      })
+      setCurrentUrl(res.current_url)
+      setResult(null)
+      setPhase('picking')
+    } catch (err) {
+      setError(errMsg(err))
+    } finally {
+      setNavigating(false)
+    }
+  }
+
+  function handleRetry() {
+    setResult(null); setError('')
+    setPhase('picking')
+  }
 
   return (
     <div className="vf-overlay" onClick={onClose}>
       <div className="vf-modal" onClick={e => e.stopPropagation()}>
         <div className="vf-header">
-          <div className="vf-title">
-            <Icons.Eye />
-            시각적 필터 — {title}
-          </div>
-          <button className="icon-btn" title="닫기 (Esc)" onClick={onClose}>
-            <Icons.X />
-          </button>
+          <div className="vf-title"><Icons.Eye /> 영역 선택 — {title}</div>
+          <button className="icon-btn" title="닫기 (Esc)" onClick={onClose}><Icons.X /></button>
         </div>
-        <iframe
-          className="vf-frame"
-          src={url}
-          title="시각적 필터"
-          allow="same-origin"
-        />
+
+        <div className="vf-hint">
+          {css_selector && phase !== 'done' && (
+            <span className="vf-hint-current">현재: <code>{css_selector}</code></span>
+          )}
+          {phase === 'picking' && <span>공지 목록과 페이지 이동 버튼이 포함된 영역을 클릭하세요</span>}
+          {phase === 'analyzing' && <span>AI가 영역을 분석하는 중...</span>}
+        </div>
+
+        <div className="vf-body">
+          {phase === 'loading' && <div className="vf-status">페이지 분석 중...</div>}
+
+          {(phase === 'picking' || phase === 'analyzing') && mapData && (
+            <div
+              className="vf-img-wrap"
+              style={{ cursor: phase === 'analyzing' ? 'wait' : 'pointer' }}
+              onMouseMove={e => { if (phase === 'picking') setHoveredEl(findElAt(e.clientX, e.clientY)) }}
+              onMouseLeave={() => setHoveredEl(null)}
+              onClick={handleClick}
+            >
+              <img
+                ref={imgRef}
+                className="vf-screenshot"
+                src={`data:image/png;base64,${mapData.image}`}
+                alt="페이지 스크린샷"
+                draggable={false}
+              />
+              {hoveredEl && phase === 'picking' && (
+                <div className="vf-el-hover" style={bboxStyle(hoveredEl.bbox)} />
+              )}
+            </div>
+          )}
+
+          {phase === 'done' && result && (
+            <div className="vf-result">
+              <div className="vf-result-label">저장 완료 · 감지된 항목 {result.titles.length}개</div>
+              {result.contentSel && (
+                <div className="vf-result-item">
+                  <span className="vf-result-item-label">공지 목록</span>
+                  <div className="vf-result-code">{result.contentSel}</div>
+                </div>
+              )}
+              {result.nextSel && (
+                <div className="vf-result-item">
+                  <span className="vf-result-item-label">다음 페이지</span>
+                  <div className="vf-result-code">{result.nextSel}</div>
+                </div>
+              )}
+              {result.titles.length > 0 && (
+                <ul className="vf-result-titles">
+                  {result.titles.map((t, i) => <li key={i}>{t}</li>)}
+                </ul>
+              )}
+              {result.titles.length === 0 && !error && (
+                <div className="vf-error">항목을 감지하지 못했습니다. 다시 선택해보세요.</div>
+              )}
+              <div className="vf-result-actions">
+                <button className="btn ghost" onClick={handleRetry}>다시 선택</button>
+                {result.nextSel && (
+                  <button className="btn ghost" onClick={handleNavigate} disabled={navigating}>
+                    {navigating ? '이동 중...' : '다음 페이지 →'}
+                  </button>
+                )}
+                <button className="btn primary" onClick={onClose}>확인</button>
+              </div>
+            </div>
+          )}
+
+          {error && phase !== 'done' && <div className="vf-error">{error}</div>}
+        </div>
       </div>
     </div>
   )
@@ -464,8 +634,8 @@ function ManagePanel({ watches, onReload, onToast }: {
   const [adding, setAdding] = useState(false)
   const [editingUuid, setEditingUuid] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
-  const [editIgnore, setEditIgnore] = useState('')
-  const [filterWatch, setFilterWatch] = useState<Watch | null>(null)
+  const [editInterval, setEditInterval] = useState('')
+  const [selectorWatch, setSelectorWatch] = useState<Watch | null>(null)
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -487,18 +657,27 @@ function ManagePanel({ watches, onReload, onToast }: {
   function startEdit(w: Watch) {
     setEditingUuid(w.uuid)
     setEditTitle(w.title)
-    setEditIgnore(w.ignore_top_lines !== null ? String(w.ignore_top_lines) : '')
+    setEditInterval(String(w.crawl_interval_hours ?? 12))
   }
 
   async function handleSave(uuid: string) {
     try {
       await updateWatch(uuid, {
         title: editTitle,
-        ignore_top_lines: editIgnore !== '' ? Number(editIgnore) : null,
+        crawl_interval_hours: editInterval !== '' ? Number(editInterval) : 12,
       })
       setEditingUuid(null)
       onReload()
       onToast('저장되었습니다.')
+    } catch (err) {
+      onToast(errMsg(err), 'error')
+    }
+  }
+
+  async function handleCrawlNow(uuid: string) {
+    try {
+      await triggerCrawl(uuid)
+      onToast('크롤을 시작했습니다.')
     } catch (err) {
       onToast(errMsg(err), 'error')
     }
@@ -559,8 +738,11 @@ function ManagePanel({ watches, onReload, onToast }: {
                   </div>
                 </div>
                 <div className="watch-actions">
-                  <button className="icon-btn" title="시각적 필터" onClick={() => setFilterWatch(w)}>
+                  <button className="icon-btn" title="영역 선택" onClick={() => setSelectorWatch(w)}>
                     <Icons.Eye />
+                  </button>
+                  <button className="icon-btn" title="지금 확인" onClick={() => handleCrawlNow(w.uuid)}>
+                    <Icons.Refresh />
                   </button>
                   <button className="icon-btn" title="설정" onClick={() => editingUuid === w.uuid ? setEditingUuid(null) : startEdit(w)}>
                     <Icons.Edit />
@@ -570,6 +752,11 @@ function ManagePanel({ watches, onReload, onToast }: {
                   </button>
                 </div>
               </div>
+              {!w.css_selector && (
+                <div className="watch-badge-row">
+                  <span className="watch-badge unset">요소 미설정</span>
+                </div>
+              )}
               {editingUuid === w.uuid && (
                 <div className="settings-panel">
                   <div className="field">
@@ -577,8 +764,8 @@ function ManagePanel({ watches, onReload, onToast }: {
                     <input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label>상단 무시 줄 수</label>
-                    <input type="number" min="0" placeholder="0" value={editIgnore} onChange={e => setEditIgnore(e.target.value)} />
+                    <label>크롤 주기 (시간)</label>
+                    <input type="number" min="1" placeholder="12" value={editInterval} onChange={e => setEditInterval(e.target.value)} />
                   </div>
                   <div className="save-actions">
                     <button className="btn primary" onClick={() => handleSave(w.uuid)}><Icons.Check /> 저장</button>
@@ -590,11 +777,12 @@ function ManagePanel({ watches, onReload, onToast }: {
           ))}
         </div>
       </div>
-      {filterWatch && (
-        <VisualFilterModal
-          uuid={filterWatch.uuid}
-          title={filterWatch.title || hostOf(filterWatch.url)}
-          onClose={() => setFilterWatch(null)}
+      {selectorWatch && (
+        <SelectorModal
+          uuid={selectorWatch.uuid}
+          title={selectorWatch.title || hostOf(selectorWatch.url)}
+          css_selector={selectorWatch.css_selector}
+          onClose={() => { setSelectorWatch(null); onReload() }}
         />
       )}
     </>
@@ -616,7 +804,7 @@ export function InboxApp() {
   const unreadCount = useMemo(() => alerts.filter(a => !a.read && !a.dismissed).length, [alerts])
   const totalAlerts = useMemo(() => alerts.filter(a => !a.dismissed).length, [alerts])
 
-  function showToast(msg: string, type?: 'error') {
+  const showToast = useCallback((msg: string, type?: 'error') => {
     const id = crypto.randomUUID()
     setToasts(prev => [...prev, { id, msg, type }])
     const timer = setTimeout(() => {
@@ -624,11 +812,13 @@ export function InboxApp() {
       toastTimers.current.delete(id)
     }, 3000)
     toastTimers.current.set(id, timer)
-  }
+  }, [])
 
   const loadData = useCallback(async () => {
     try {
       const [rawAlerts, rawWatches] = await Promise.all([fetchAlerts(), fetchWatches()])
+      const validIds = new Set((rawAlerts as { id: number }[]).map(a => a.id))
+      pruneStale(validIds)
       const readSet = getRead()
       const dismissedSet = getDismissed()
       const enriched: Alert[] = (rawAlerts as Omit<Alert, 'read' | 'dismissed'>[])
@@ -640,7 +830,7 @@ export function InboxApp() {
     } catch (err) {
       showToast(errMsg(err), 'error')
     }
-  }, [])
+  }, [showToast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -688,6 +878,21 @@ export function InboxApp() {
     setAlerts(prev => prev.map(a => idSet.has(a.id) ? { ...a, read: true } : a))
   }
 
+  async function deleteRead() {
+    const uuid = scopeWatchUuid(scope)
+    const ids = alerts
+      .filter(a => a.read && !a.dismissed && (uuid === null || a.watch_uuid === uuid))
+      .map(a => a.id)
+    if (ids.length === 0) return
+    try {
+      await deleteAlerts(ids)
+      setAlerts(prev => prev.filter(a => !ids.includes(a.id)))
+      showToast(`읽은 알림 ${ids.length}개를 삭제했습니다.`)
+    } catch (err) {
+      showToast(errMsg(err), 'error')
+    }
+  }
+
   async function reloadWatches() {
     try {
       setWatches(await fetchWatches())
@@ -719,6 +924,7 @@ export function InboxApp() {
             onDismiss={dismiss}
             onMarkRead={markRead}
             onMarkAllRead={markAllRead}
+            onDeleteRead={deleteRead}
           />
         )}
       </main>
