@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import re
 import time
+import unicodedata
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -14,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 5
 _MAX_KNOWN_TITLES = 200
+
+
+def _normalize(t: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", t)).strip()
 
 
 # ── DB 헬퍼 ───────────────────────────────────────────────────────────────────
@@ -72,7 +78,7 @@ async def process_watch(watch: dict) -> None:
     known_titles_raw = watch.get("known_titles")
     first_crawl = known_titles_raw is None
     known_titles_list: list[str] = json.loads(known_titles_raw or "[]")
-    known_titles_set: set[str] = set(known_titles_list)
+    known_titles_set: set[str] = {_normalize(t) for t in known_titles_list}
 
     now = int(time.time())
     all_new_items: list[dict] = []
@@ -97,6 +103,7 @@ async def process_watch(watch: dict) -> None:
                 items = [{"title": t, "summary": ""} for t in dom_titles]
             else:
                 items = await ai_client.extract_titles(page_info["element_image"])
+            items = [{"title": _normalize(i["title"]), "summary": i.get("summary", "")} for i in items]
         except Exception as e:
             logger.error(f"crawl failed for {uuid} page {page_num}: {e}")
             break

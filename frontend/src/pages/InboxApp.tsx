@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { Alert, Watch, Toast } from '../types'
 import { Icons } from '../icons'
-import { fetchAlerts, fetchWatches, createWatch, updateWatch, deleteWatch, getElementMap, triggerCrawl, analyzeRegion, navigateElementMap, deleteAlerts } from '../api'
+import { fetchAlerts, fetchWatches, createWatch, updateWatch, deleteWatch, getElementMap, triggerCrawl, analyzeRegion, deleteAlerts } from '../api'
 import { getRead, addRead, addReadAll, getDismissed, addDismissed, pruneStale } from '../storage'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -439,8 +439,8 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
   const [hoveredEl, setHoveredEl] = useState<ElementInfo | null>(null)
   const [result, setResult] = useState<SelectorResult | null>(null)
   const [error, setError] = useState('')
-  const [currentUrl, setCurrentUrl] = useState('')
-  const [navigating, setNavigating] = useState(false)
+
+
 
   const imgRef = useRef<HTMLImageElement>(null)
 
@@ -448,7 +448,6 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
 
   useEffect(() => {
     setPhase('loading')
-    setCurrentUrl('')
     getElementMap(uuid)
       .then(res => {
         setMapData({
@@ -513,28 +512,6 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
     }
   }
 
-  async function handleNavigate() {
-    if (!result?.nextSel) return
-    setNavigating(true)
-    setError('')
-    try {
-      const res = await navigateElementMap(uuid, currentUrl, result.nextSel)
-      setMapData({
-        image: res.image,
-        pageHeight: res.page_height || 1,
-        viewportWidth: res.viewport_width || 1280,
-        elements: res.elements,
-      })
-      setCurrentUrl(res.current_url)
-      setResult(null)
-      setPhase('picking')
-    } catch (err) {
-      setError(errMsg(err))
-    } finally {
-      setNavigating(false)
-    }
-  }
-
   function handleRetry() {
     setResult(null); setError('')
     setPhase('picking')
@@ -589,12 +566,6 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
                   <div className="vf-result-code">{result.contentSel}</div>
                 </div>
               )}
-              {result.nextSel && (
-                <div className="vf-result-item">
-                  <span className="vf-result-item-label">다음 페이지</span>
-                  <div className="vf-result-code">{result.nextSel}</div>
-                </div>
-              )}
               {result.titles.length > 0 && (
                 <ul className="vf-result-titles">
                   {result.titles.map((t, i) => <li key={i}>{t}</li>)}
@@ -605,11 +576,6 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
               )}
               <div className="vf-result-actions">
                 <button className="btn ghost" onClick={handleRetry}>다시 선택</button>
-                {result.nextSel && (
-                  <button className="btn ghost" onClick={handleNavigate} disabled={navigating}>
-                    {navigating ? '이동 중...' : '다음 페이지 →'}
-                  </button>
-                )}
                 <button className="btn primary" onClick={onClose}>확인</button>
               </div>
             </div>
