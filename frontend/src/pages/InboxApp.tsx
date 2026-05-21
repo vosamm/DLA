@@ -99,12 +99,11 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
-function Header({ unreadCount, totalAlerts, totalWatches, lastUpdated, onRefresh, onManage }: {
+function Header({ unreadCount, totalAlerts, totalWatches, lastUpdated, onManage }: {
   unreadCount: number
   totalAlerts: number
   totalWatches: number
   lastUpdated: Date | null
-  onRefresh: () => void
   onManage: () => void
 }) {
   return (
@@ -126,7 +125,6 @@ function Header({ unreadCount, totalAlerts, totalWatches, lastUpdated, onRefresh
             {lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
-        <button className="icon-btn" title="새로고침" onClick={onRefresh}><Icons.Refresh /></button>
         <button className="icon-btn" title="모니터 관리" onClick={onManage}><Icons.Settings /></button>
       </div>
     </header>
@@ -425,7 +423,7 @@ type ElementInfo = {
 }
 
 type MapData = { image: string; pageHeight: number; viewportWidth: number; elements: ElementInfo[] }
-type SelectorResult = { contentSel: string | null; nextSel: string | null; titles: string[] }
+type SelectorResult = { contentSel: string | null; nextSel: string | null; nextImg: string | null; titles: string[] }
 
 function SelectorModal({ uuid, title, css_selector, onClose }: {
   uuid: string
@@ -503,7 +501,7 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
         { x1: x, y1: y, x2: x + w, y2: y + h, page_height: mapData.pageHeight, viewport_width: mapData.viewportWidth },
         mapData.elements,
       )
-      setResult({ contentSel: res.css_selector, nextSel: res.next_page_selector, titles: res.titles })
+      setResult({ contentSel: res.css_selector, nextSel: res.next_page_selector, nextImg: res.next_page_image ?? null, titles: res.titles })
       if (res.error) setError(`AI 오류: ${res.error}`)
       setPhase('done')
     } catch (err) {
@@ -566,6 +564,15 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
                   <div className="vf-result-code">{result.contentSel}</div>
                 </div>
               )}
+              <div className="vf-result-item">
+                <span className="vf-result-item-label">페이지네이션</span>
+                {result.nextSel
+                  ? (result.nextImg
+                      ? <img src={`data:image/png;base64,${result.nextImg}`} className="vf-result-preview" alt="pagination" />
+                      : <div className="vf-result-code">{result.nextSel}</div>)
+                  : <div className="vf-result-code vf-result-none">감지 안 됨</div>
+                }
+              </div>
               {result.titles.length > 0 && (
                 <ul className="vf-result-titles">
                   {result.titles.map((t, i) => <li key={i}>{t}</li>)}
@@ -874,7 +881,6 @@ export function InboxApp() {
         totalAlerts={totalAlerts}
         totalWatches={watches.length}
         lastUpdated={lastUpdated}
-        onRefresh={loadData}
         onManage={() => setScope('manage')}
       />
       <Sidebar scope={scope} watches={watches} alerts={alerts} onScope={setScope} />

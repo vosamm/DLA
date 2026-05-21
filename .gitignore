@@ -25,3 +25,6 @@ app/static/index.html
 
 # Archives
 *.zip
+
+# 문서 (로컬 전용)
+docs/

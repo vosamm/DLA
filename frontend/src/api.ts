@@ -96,7 +96,7 @@ export async function analyzeRegion(
   uuid: string,
   region: { x1: number; y1: number; x2: number; y2: number; page_height: number; viewport_width: number },
   elements: { selector: string; bbox: { x: number; y: number; w: number; h: number }; text: string }[]
-): Promise<{ css_selector: string | null; next_page_selector: string | null; titles: string[]; error: string }> {
+): Promise<{ css_selector: string | null; next_page_selector: string | null; next_page_image: string | null; titles: string[]; error: string }> {
   const res = await fetch(`/api/watches/${uuid}/analyze-region`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

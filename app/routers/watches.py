@@ -2,7 +2,7 @@ import base64
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from database import get_db
@@ -159,12 +159,14 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
     error_msg = ""
 
     try:
-        screenshot = await crawler.screenshot_roi(url, roi)
+        screenshot, next_seq_selector, pagination_area_selector = await crawler.screenshot_roi_with_next_seq(url, roi)
         image_b64 = base64.b64encode(screenshot).decode()
 
         result = await ai_client.identify_selectors(image_b64, body.elements)
         css_selector = result.get("content_selector")
-        next_page_selector = result.get("next_page_selector")
+        next_page_selector = result.get("next_page_selector") or next_seq_selector
+
+        next_page_image: str | None = None
 
         if css_selector:
             try:
@@ -173,6 +175,14 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
                 titles = [item["title"] for item in items]
             except Exception as e:
                 logger.warning(f"title extraction failed for watch {uuid}: {e}")
+
+            pag_screenshot_sel = pagination_area_selector or next_page_selector
+            if pag_screenshot_sel:
+                try:
+                    pag_shot = await crawler.screenshot_element(url, pag_screenshot_sel)
+                    next_page_image = base64.b64encode(pag_shot).decode()
+                except Exception as e:
+                    logger.warning(f"pagination screenshot failed for watch {uuid}: {e}")
 
             with get_db() as conn:
                 conn.execute(
@@ -186,6 +196,7 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
     return {
         "css_selector": css_selector,
         "next_page_selector": next_page_selector,
+        "next_page_image": next_page_image,
         "titles": titles,
         "error": error_msg,
     }

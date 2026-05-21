@@ -112,32 +112,113 @@ _DOM_TITLES_JS = r"""
 (selector) => {
     const container = document.querySelector(selector);
     if (!container) return [];
-    // 공지 제목은 보통 <a> 링크로 표시됨
-    const links = Array.from(container.querySelectorAll('a')).filter(a => {
-        const t = (a.innerText || a.textContent || '').trim();
-        return t.length > 10 && t.length < 300
-            && !/^\d+$/.test(t)
-            && !/^(다음|이전|next|prev|[><»«▶◀])$/i.test(t);
-    });
-    if (links.length >= 2) {
-        return links.map(a => (a.innerText || a.textContent || '').trim().replace(/\s+/g, ' '));
+
+    function firstTitle(row) {
+        // 행 안의 링크 중 텍스트가 충분히 긴 첫 번째 링크 = 제목
+        for (const a of row.querySelectorAll('a')) {
+            const t = (a.innerText || a.textContent || '').trim().replace(/\s+/g, ' ');
+            if (t.length > 10 && t.length < 300 && !/^\d+$/.test(t)
+                && !/^(다음|이전|next|prev|[><»«▶◀])$/i.test(t)) {
+                return t;
+            }
+        }
+        return null;
     }
-    // 링크가 없으면 tr/li 단위로 텍스트 추출
-    const rows = Array.from(container.querySelectorAll('tr, li'));
-    const items = rows.length > 0 ? rows : Array.from(container.children);
-    return items
-        .map(el => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 300))
-        .filter(t => t.length > 5);
+
+    // ARIA role 포함 행 단위 요소 탐색 (tr, li, role=listitem/row)
+    const rows = Array.from(container.querySelectorAll(
+        'tr, li, [role="listitem"], [role="row"]'
+    ));
+    if (rows.length >= 2) {
+        const titles = rows.map(firstTitle).filter(Boolean);
+        if (titles.length >= 2) return titles;
+    }
+
+    // 행 구조 없으면 컨테이너 직속 자식 기준
+    const children = Array.from(container.children);
+    if (children.length >= 2) {
+        const titles = children.map(firstTitle).filter(Boolean);
+        if (titles.length >= 2) return titles;
+    }
+
+    return [];
 }
 """
 
 
-async def _extract_dom_titles(page: Page, selector: str) -> list[str]:
-    """CSS 셀렉터 컨테이너에서 공지 제목 목록을 DOM에서 직접 추출."""
+_NEXT_SEQ_JS = r"""
+() => {
+    function getSelector(el) {
+        if (el.id && /^[a-zA-Z_]/.test(el.id)) return '#' + el.id;
+        const parts = [];
+        let cur = el;
+        for (let d = 0; d < 6 && cur && cur.tagName; d++) {
+            if (cur === document.body) break;
+            if (cur.id && /^[a-zA-Z_]/.test(cur.id)) { parts.unshift('#' + cur.id); break; }
+            const tag = cur.tagName.toLowerCase();
+            const cls = Array.from(cur.classList)
+                .filter(c => /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(c) && c.length < 30)
+                .slice(0, 2);
+            let part = tag;
+            if (cls.length) {
+                part += '.' + cls.join('.');
+            } else {
+                const parent = cur.parentElement;
+                if (parent) {
+                    const sibs = Array.from(parent.children).filter(s => s.tagName === cur.tagName);
+                    if (sibs.length > 1) part += ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')';
+                }
+            }
+            parts.unshift(part);
+            cur = cur.parentElement;
+        }
+        return parts.join(' > ');
+    }
+
+    // 페이지네이션 후보를 모두 수집 후, 가장 작은 페이지 번호(1~5)를 포함한 컨테이너 우선 선택
+    const candidates = Array.from(document.querySelectorAll(
+        '[class*="pag"], [class*="page-nav"], [class*="paginate"], ' +
+        '.pagination, nav[aria-label], [role="navigation"]'
+    ));
+
+    function scorePagination(el) {
+        const nums = Array.from(el.querySelectorAll('a, button, strong, b, em'))
+            .map(e => parseInt(e.textContent.trim()))
+            .filter(n => !isNaN(n) && n > 0);
+        if (nums.length === 0) return -1;
+        // 최솟값이 작을수록 (1~5 근처), 개수가 많을수록 높은 점수
+        return 100 - Math.min(...nums) + nums.length;
+    }
+
+    candidates.sort((a, b) => scorePagination(b) - scorePagination(a));
+    const paginationArea = candidates[0] || null;
+    if (!paginationArea || scorePagination(paginationArea) < 0) return null;
+
+    const activeEl = paginationArea.querySelector(
+        '.active, .current, .on, .selected, [aria-current], strong, b, em'
+    );
+    if (!activeEl) return null;
+
+    const currentNum = parseInt(activeEl.textContent.trim());
+    if (isNaN(currentNum)) return null;
+
+    const areaSel = getSelector(paginationArea);
+    for (const el of paginationArea.querySelectorAll('a, button')) {
+        if (parseInt(el.textContent.trim()) === currentNum + 1) {
+            return { nextSel: getSelector(el), areaSel };
+        }
+    }
+    return null;
+}
+"""
+
+
+async def _get_titles(page: Page, selector: str) -> list[str]:
+    """DOM에서 제목 추출. 실패하면 빈 리스트 반환(AI 폴백은 호출부에서 처리)."""
     try:
         return await page.evaluate(_DOM_TITLES_JS, selector)
     except Exception as e:
-        logger.warning(f"_extract_dom_titles failed [{selector}]: {e}")
+        logger.warning(f"_get_titles failed [{selector}]: {e}")
         return []
 
 
@@ -192,6 +273,24 @@ class Crawler:
         finally:
             await ctx.close()
 
+    async def screenshot_roi_with_next_seq(self, url: str, roi: dict) -> tuple[bytes, str | None, str | None]:
+        """ROI 크롭 스크린샷, 다음 버튼 selector, 페이지네이션 컨테이너 selector를 단일 세션으로 반환."""
+        browser = await self._ensure_browser()
+        ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
+        try:
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            image = await _crop_roi(page, roi)
+            _next_seq = await page.evaluate(_NEXT_SEQ_JS)
+            next_sel = _next_seq["nextSel"] if _next_seq else None
+            area_sel = _next_seq["areaSel"] if _next_seq else None
+            return image, next_sel, area_sel
+        except Exception as e:
+            logger.error(f"screenshot_roi_with_next_seq failed for {url}: {e}")
+            raise
+        finally:
+            await ctx.close()
+
     async def get_element_map(self, url: str) -> dict:
         """페이지 전체 스크린샷 + 주요 요소 목록(셀렉터·bbox·텍스트)을 반환."""
         browser = await self._ensure_browser()
@@ -234,26 +333,28 @@ class Crawler:
     async def get_page_content(
         self, url: str, *, selector: str
     ) -> dict:
-        """단일 브라우저 세션: 요소 스크린샷 + 전체 페이지 element map."""
+        """단일 브라우저 세션: 요소 텍스트 + 전체 페이지 element map."""
         browser = await self._ensure_browser()
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
-            dom_titles = await _extract_dom_titles(page, selector)
+            dom_titles = await _get_titles(page, selector)
             el = await page.query_selector(selector)
             if not el:
                 raise ValueError(f"Selector not found: {selector}")
-            element_png = await el.screenshot(type="png")
+            element_text = await el.inner_text()
 
             full_png = await page.screenshot(type="png", full_page=True)
             elements = await page.evaluate(_ELEMENT_MAP_JS)
+            _next_seq = await page.evaluate(_NEXT_SEQ_JS)
             return {
-                "element_image": base64.b64encode(element_png).decode(),
+                "element_text": element_text,
                 "image": base64.b64encode(full_png).decode(),
                 "elements": elements,
                 "dom_titles": dom_titles,
+                "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
             logger.error(f"get_page_content failed for {url}: {e}")
@@ -268,7 +369,7 @@ class Crawler:
         *,
         element_selector: str,
     ) -> dict:
-        """next_selector 클릭 후 새 페이지의 element_image + element map을 단일 세션으로 반환."""
+        """next_selector 클릭 후 새 페이지의 element 텍스트 + element map을 단일 세션으로 반환."""
         browser = await self._ensure_browser()
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
@@ -281,20 +382,22 @@ class Crawler:
             await page.wait_for_load_state("networkidle", timeout=15000)
             current_url = page.url
 
-            dom_titles = await _extract_dom_titles(page, element_selector)
+            dom_titles = await _get_titles(page, element_selector)
             el = await page.query_selector(element_selector)
             if not el:
                 raise ValueError(f"Element selector not found after navigation: {element_selector}")
-            element_png = await el.screenshot(type="png")
+            element_text = await el.inner_text()
 
             full_png = await page.screenshot(type="png", full_page=True)
             elements = await page.evaluate(_ELEMENT_MAP_JS)
+            _next_seq = await page.evaluate(_NEXT_SEQ_JS)
             return {
-                "element_image": base64.b64encode(element_png).decode(),
+                "element_text": element_text,
                 "image": base64.b64encode(full_png).decode(),
                 "elements": elements,
                 "current_url": current_url,
                 "dom_titles": dom_titles,
+                "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
             logger.error(f"navigate_and_get_content failed for {url}: {e}")

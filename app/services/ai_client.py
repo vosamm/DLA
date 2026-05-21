@@ -34,11 +34,14 @@ FIND_NEXT_PROMPT = """\
 ROI_EXTRACT_PROMPT = """\
 이 이미지는 웹페이지 공지사항/게시글 목록 영역의 스크린샷입니다.
 
-화면에 보이는 게시글 제목을 모두 추출하여 다음 JSON 형식으로 반환하세요:
+각 게시글의 제목만 추출하여 다음 JSON 형식으로 반환하세요:
 {"items": [{"title": "제목 원문", "summary": "날짜·마감·대상 등 핵심 정보 (없으면 빈 문자열)"}]}
 
-주의:
-- title은 제목 원문 그대로 (번호·날짜·조회수·부서명 등 메타데이터 제외)
+규칙:
+- items 배열 길이 = 화면에 보이는 게시글 수 (게시글 1개 → 항목 1개, 초과 금지)
+- 제목 아래 미리보기·설명·요약문은 별도 항목으로 추가하지 말 것 (제목과 같은 게시글의 일부)
+- 작성자명·닉네임·날짜·조회수·포인트·댓글 수 제외
+- title은 클릭 가능한 링크 텍스트 (가장 크고 굵게 표시된 줄)
 - 항목이 없으면 {"items": []} 반환
 - JSON 외 텍스트 출력 금지"""
 
@@ -86,6 +89,36 @@ class AIClient:
             ]
         except Exception as e:
             logger.error(f"extract_titles failed: {type(e).__name__}: {e}")
+            return []
+
+    async def extract_titles_from_text(self, text: str) -> list[dict]:
+        """요소 텍스트에서 공지 제목 목록 추출 (이미지 없이 텍스트만 사용)."""
+        prompt = (
+            "아래는 웹페이지 공지사항/게시글 목록 영역의 텍스트입니다.\n"
+            "각 게시글의 제목만 추출하여 JSON으로 반환하세요:\n"
+            '{"items": [{"title": "제목 원문", "summary": "날짜·마감·대상 등 핵심 정보 (없으면 빈 문자열)"}]}\n\n'
+            "규칙:\n"
+            "- 게시글 1개당 항목 1개 (제목 아래 설명문은 별도 항목 금지)\n"
+            "- 번호·날짜·조회수·작성자·부서명 제외, 제목 원문만\n"
+            "- 항목 없으면 {\"items\": []} 반환, JSON 외 출력 금지\n\n"
+            "텍스트:\n"
+        ) + text[:4000]
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                timeout=30,
+            )
+            parsed = json.loads(response.choices[0].message.content or "")
+            items = parsed.get("items", [])
+            return [
+                {"title": i["title"].strip(), "summary": i.get("summary", "").strip()}
+                for i in items if i.get("title", "").strip()
+            ]
+        except Exception as e:
+            logger.error(f"extract_titles_from_text failed: {type(e).__name__}: {e}")
             return []
 
     async def identify_selectors(self, image_b64: str, elements: list[dict]) -> dict:

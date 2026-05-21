@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 5
 _MAX_KNOWN_TITLES = 200
+_CRAWL_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _normalize(t: str) -> str:
@@ -81,6 +82,7 @@ async def process_watch(watch: dict) -> None:
     known_titles_set: set[str] = {_normalize(t) for t in known_titles_list}
 
     now = int(time.time())
+    db_update_crawled(uuid, now)  # 크롤 시작 시점에 선점 → 스케줄러 중복 실행 방지
     all_new_items: list[dict] = []
     current_url = url
 
@@ -102,7 +104,7 @@ async def process_watch(watch: dict) -> None:
             if dom_titles:
                 items = [{"title": t, "summary": ""} for t in dom_titles]
             else:
-                items = await ai_client.extract_titles(page_info["element_image"])
+                items = await ai_client.extract_titles_from_text(page_info["element_text"])
             items = [{"title": _normalize(i["title"]), "summary": i.get("summary", "")} for i in items]
         except Exception as e:
             logger.error(f"crawl failed for {uuid} page {page_num}: {e}")
@@ -111,38 +113,35 @@ async def process_watch(watch: dict) -> None:
         if not items:
             break
 
-        if first_crawl:
-            for item in items:
-                title = item["title"]
-                if title not in known_titles_set:
-                    known_titles_list.append(title)
-                    known_titles_set.add(title)
-            break  # 첫 크롤은 1페이지만 시딩
-
         new_items = []
         reached_known = False
+        found_new = False
         for item in items:
             if item["title"] in known_titles_set:
-                reached_known = True
-                break
-            new_items.append(item)
+                if found_new:
+                    # 새 항목 발견 후 기존 항목 → 여기서 중단
+                    reached_known = True
+                    break
+                # 새 항목 발견 전 기존 항목 → 상단 고정 공지이므로 스킵
+            else:
+                found_new = True
+                new_items.append(item)
 
         all_new_items.extend(new_items)
         if reached_known:
             break  # 아는 항목 발견 → 이후 페이지 불필요
 
-        next_sel = next_page_selector or await ai_client.find_next_selector(
-            page_info["image"], page_info["elements"]
+        # 순차 페이지 번호 버튼 우선, 없으면 저장된 다음 버튼, 그것도 없으면 AI 탐색
+        next_sel = (
+            page_info.get("next_seq_selector")
+            or next_page_selector
+            or await ai_client.find_next_selector(page_info["image"], page_info["elements"])
         )
         if not next_sel:
             break
-        logger.info(f"[{uuid}] page {page_num + 1} 이동")
+        logger.info(f"[{uuid}] page {page_num + 1} 이동 (selector: {next_sel})")
 
-    if first_crawl:
-        seeded = known_titles_list[:_MAX_KNOWN_TITLES]
-        logger.info(f"First crawl for {uuid}: seeded {len(seeded)} titles")
-        db_save_known_titles(uuid, seeded, now)
-    elif all_new_items:
+    if all_new_items:
         for item in all_new_items:
             db_save_alert(
                 uuid, url, type_,
