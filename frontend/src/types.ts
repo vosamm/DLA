@@ -3,7 +3,7 @@ export interface Alert {
   watch_uuid: string
   url: string
   type: 'content' | 'market'
-  analysis: { title?: string; summary?: string }
+  analysis: { title?: string; summary?: string; href?: string }
   changed_at: number
   // client-side state
   read: boolean

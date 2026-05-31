@@ -13,6 +13,7 @@ services:
       - AI_API_BASE=${AI_API_BASE:-https://factchat-cloud.mindlogic.ai/v1/gateway}
       - AI_MODEL=${AI_MODEL:-gpt-5.4-mini}
       - POLL_INTERVAL=${POLL_INTERVAL:-60}
+      - DATABASE_PATH=/app/data/noticeping.db
     volumes:
-      - ./data/app:/app/data
+      - ./data:/app/data
     restart: unless-stopped

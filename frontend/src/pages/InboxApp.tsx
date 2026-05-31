@@ -262,6 +262,11 @@ function AlertRow({ alert, watchMap, onOpen, onDismiss, onMarkRead }: {
         )}
       </div>
       <div className="alert-actions" onClick={e => e.stopPropagation()}>
+        {alert.analysis.href && (
+          <a className="icon-btn" href={alert.analysis.href} target="_blank" rel="noopener noreferrer" title="원문보기">
+            <Icons.External />
+          </a>
+        )}
         {!alert.read && (
           <button className="icon-btn" title="읽음 표시" onClick={() => onMarkRead(alert.id)}>
             <Icons.Check />
@@ -403,7 +408,12 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
               )}
             </div>
             <div className="detail-footer">
-              <button className="btn danger" onClick={() => { onDismiss(alert.id); onClose() }}>
+              {alert.analysis.href && (
+                <a className="btn primary" href={alert.analysis.href} target="_blank" rel="noopener noreferrer">
+                  <Icons.External /> 원문보기
+                </a>
+              )}
+              <button className="btn ghost" onClick={() => { onDismiss(alert.id); onClose() }}>
                 <Icons.X /> 닫기
               </button>
             </div>
@@ -528,7 +538,7 @@ function SelectorModal({ uuid, title, css_selector, onClose }: {
             <span className="vf-hint-current">현재: <code>{css_selector}</code></span>
           )}
           {phase === 'picking' && <span>공지 목록과 페이지 이동 버튼이 포함된 영역을 클릭하세요</span>}
-          {phase === 'analyzing' && <span>AI가 영역을 분석하는 중...</span>}
+          {phase === 'analyzing' && <span>영역을 분석하는 중...</span>}
         </div>
 
         <div className="vf-body">

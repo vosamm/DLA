@@ -98,6 +98,7 @@ class AIClient:
             "각 게시글의 제목만 추출하여 JSON으로 반환하세요:\n"
             '{"items": [{"title": "제목 원문", "summary": "날짜·마감·대상 등 핵심 정보 (없으면 빈 문자열)"}]}\n\n'
             "규칙:\n"
+            "- 제목은 반드시 아래 텍스트에 그대로 등장하는 문장만 사용. 없는 말 추가·변형·조합 절대 금지\n"
             "- 게시글 1개당 항목 1개 (제목 아래 설명문은 별도 항목 금지)\n"
             "- 번호·날짜·조회수·작성자·부서명 제외, 제목 원문만\n"
             "- 항목 없으면 {\"items\": []} 반환, JSON 외 출력 금지\n\n"
@@ -155,6 +156,68 @@ class AIClient:
         except Exception as e:
             logger.error(f"find_next_selector failed: {e}")
             return None
+
+    async def summarize_detail(self, text: str) -> str:
+        """상세 페이지 본문을 2~3문장으로 요약."""
+        prompt = (
+            "아래는 공지사항·게시글의 상세 페이지 내용입니다.\n"
+            "핵심 내용만 2~3문장으로 간결하게 요약하세요.\n"
+            "날짜·작성자·조회수 등 메타정보는 제외하고 실제 내용 위주로 요약하세요.\n\n"
+            f"본문:\n{text[:4000]}\n\n"
+            '다음 JSON 형식으로만 답하세요:\n{"summary": "요약 내용"}'
+        )
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                timeout=30,
+            )
+            result = json.loads(response.choices[0].message.content or "{}")
+            return result.get("summary", "")
+        except Exception as e:
+            logger.error(f"summarize_detail failed: {e}")
+            return ""
+
+    async def find_href_for_titles(
+        self,
+        unmatched_titles: list[str],
+        title_links: list[dict],
+    ) -> dict[str, str]:
+        """DOM 매칭 실패 제목들을 title_links와 fuzzy 매칭해 {title: href} 반환."""
+        if not unmatched_titles or not title_links:
+            return {}
+        titles_json = json.dumps(unmatched_titles, ensure_ascii=False)
+        links_json = json.dumps(
+            [{"title": l["title"], "href": l["href"]} for l in title_links[:50]],
+            ensure_ascii=False,
+        )
+        prompt = (
+            "두 목록을 보고 의미상 같은 항목끼리 매칭하세요.\n\n"
+            f"제목 목록:\n{titles_json}\n\n"
+            f"링크 목록 (텍스트가 약간 다를 수 있음):\n{links_json}\n\n"
+            "각 제목과 가장 의미상 같은 링크의 href를 찾아 반환하세요. "
+            "확실하지 않으면 null.\n"
+            '형식: {"matches": [{"title": "원본제목", "href": "url 또는 null"}]}'
+        )
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                timeout=20,
+            )
+            parsed = json.loads(response.choices[0].message.content or "{}")
+            return {
+                m["title"]: m["href"]
+                for m in parsed.get("matches", [])
+                if m.get("title") and m.get("href")
+            }
+        except Exception as e:
+            logger.error(f"find_href_for_titles failed: {e}")
+            return {}
 
 
 ai_client = AIClient()

@@ -108,40 +108,75 @@ _ELEMENT_MAP_JS = r"""() => {
             }"""
 
 
-_DOM_TITLES_JS = r"""
+_DOM_ITEMS_JS = r"""
 (selector) => {
     const container = document.querySelector(selector);
-    if (!container) return [];
+    if (!container) return {titles: [], links: []};
 
-    function firstTitle(row) {
-        // 행 안의 링크 중 텍스트가 충분히 긴 첫 번째 링크 = 제목
+    function isNav(t) {
+        return /^(다음|이전|next|prev|[><\u00BB\u00AB\u25B6\u25C0]|\d{1,3})$/i.test(t.trim());
+    }
+
+    const TITLE_SEL = 'h1,h2,h3,h4,h5,h6,[class*="title"],[class*="subject"],[class*="tit"],[class*="heading"]';
+
+    function bestTitle(row) {
+        const candidates = Array.from(row.querySelectorAll(TITLE_SEL));
+        const leaves = candidates.filter(el => !el.querySelector(TITLE_SEL));
+        for (const el of (leaves.length ? leaves : candidates)) {
+            const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+            if (t.length > 5 && t.length < 300 && !isNav(t)) return t;
+        }
         for (const a of row.querySelectorAll('a')) {
             const t = (a.innerText || a.textContent || '').trim().replace(/\s+/g, ' ');
-            if (t.length > 10 && t.length < 300 && !/^\d+$/.test(t)
-                && !/^(다음|이전|next|prev|[><»«▶◀])$/i.test(t)) {
-                return t;
-            }
+            if (t.length > 10 && t.length < 300 && !isNav(t)) return t;
         }
         return null;
     }
 
-    // ARIA role 포함 행 단위 요소 탐색 (tr, li, role=listitem/row)
-    const rows = Array.from(container.querySelectorAll(
-        'tr, li, [role="listitem"], [role="row"]'
-    ));
-    if (rows.length >= 2) {
-        const titles = rows.map(firstTitle).filter(Boolean);
-        if (titles.length >= 2) return titles;
+    function isDownload(href) {
+        return /[?&]fSeq=|\/(?:download|attach|file|filedown)[/.]|\.(pdf|hwp|doc|xls|ppt|zip|csv)(x?)(\?|$)/i.test(href);
     }
 
-    // 행 구조 없으면 컨테이너 직속 자식 기준
-    const children = Array.from(container.children);
-    if (children.length >= 2) {
-        const titles = children.map(firstTitle).filter(Boolean);
-        if (titles.length >= 2) return titles;
+    function bestHref(row) {
+        if (row.tagName === 'A' && row.href && !row.href.startsWith('javascript') && !isDownload(row.href)) return row.href;
+        for (const a of row.querySelectorAll('a[href]')) {
+            const t = (a.innerText || '').trim().replace(/\s+/g, ' ');
+            if (!a.href.startsWith('javascript') && !isNav(t) && !isDownload(a.href)) return a.href;
+        }
+        return null;
     }
 
-    return [];
+    const ROW_SEL = 'tr, li, [role="listitem"], [role="row"], article';
+    const CARD_SEL = '[class*="item"], [class*="card"], [class*="post"], [class*="list-el"]';
+
+    function findRows(el) {
+        let rows = Array.from(el.querySelectorAll(ROW_SEL));
+        if (rows.length < 2) rows = Array.from(el.querySelectorAll(CARD_SEL));
+        if (rows.length >= 2) return rows;
+        const children = Array.from(el.children);
+        if (children.length === 1) {
+            const deeper = findRows(children[0]);
+            if (deeper.length >= 2) return deeper;
+        }
+        return children;
+    }
+
+    const items = findRows(container);
+
+    const titles = [];
+    const links = [];
+    const seen = new Set();
+
+    for (const item of items) {
+        const t = bestTitle(item);
+        if (!t || seen.has(t)) continue;
+        seen.add(t);
+        titles.push(t);
+        const href = bestHref(item);
+        if (href) links.push({title: t, href});
+    }
+
+    return {titles, links};
 }
 """
 
@@ -192,34 +227,38 @@ _NEXT_SEQ_JS = r"""
 
     candidates.sort((a, b) => scorePagination(b) - scorePagination(a));
     const paginationArea = candidates[0] || null;
-    if (!paginationArea || scorePagination(paginationArea) < 0) return null;
-
-    const activeEl = paginationArea.querySelector(
-        '.active, .current, .on, .selected, [aria-current], strong, b, em'
-    );
-    if (!activeEl) return null;
-
-    const currentNum = parseInt(activeEl.textContent.trim());
-    if (isNaN(currentNum)) return null;
-
-    const areaSel = getSelector(paginationArea);
-    for (const el of paginationArea.querySelectorAll('a, button')) {
-        if (parseInt(el.textContent.trim()) === currentNum + 1) {
-            return { nextSel: getSelector(el), areaSel };
+    if (paginationArea && scorePagination(paginationArea) >= 0) {
+        const activeEl = paginationArea.querySelector(
+            '.active, .current, .on, .selected, [aria-current], strong, b, em'
+        );
+        if (activeEl) {
+            const currentNum = parseInt(activeEl.textContent.trim());
+            if (!isNaN(currentNum)) {
+                const areaSel = getSelector(paginationArea);
+                for (const el of paginationArea.querySelectorAll('a, button')) {
+                    if (parseInt(el.textContent.trim()) === currentNum + 1) {
+                        return { nextSel: getSelector(el), areaSel };
+                    }
+                }
+            }
         }
+    }
+
+    const NEXT_RE = /^(다음|next|[›»]|>{1,2})$/i;
+    for (const el of document.querySelectorAll('a[href], button')) {
+        const t = (el.innerText || el.textContent || '').trim();
+        if (NEXT_RE.test(t)) return { nextSel: getSelector(el), areaSel: getSelector(el) };
+    }
+
+    const curPage = parseInt(new URLSearchParams(window.location.search).get('page') || '1');
+    for (const el of document.querySelectorAll('a[href*="page="]')) {
+        const m = el.href.match(/[?&]page=(\d+)/);
+        if (m && parseInt(m[1]) === curPage + 1) return { nextSel: getSelector(el), areaSel: getSelector(el) };
     }
     return null;
 }
 """
 
-
-async def _get_titles(page: Page, selector: str) -> list[str]:
-    """DOM에서 제목 추출. 실패하면 빈 리스트 반환(AI 폴백은 호출부에서 처리)."""
-    try:
-        return await page.evaluate(_DOM_TITLES_JS, selector)
-    except Exception as e:
-        logger.warning(f"_get_titles failed [{selector}]: {e}")
-        return []
 
 
 async def _crop_roi(page: Page, roi: dict) -> bytes:
@@ -340,7 +379,13 @@ class Crawler:
             page = await ctx.new_page()
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
-            dom_titles = await _get_titles(page, selector)
+            try:
+                dom_items = await page.evaluate(_DOM_ITEMS_JS, selector)
+            except Exception as e:
+                logger.warning(f"_dom_items failed [{selector}]: {e}")
+                dom_items = {"titles": [], "links": []}
+            dom_titles = dom_items.get("titles", [])
+            title_links = dom_items.get("links", [])
             el = await page.query_selector(selector)
             if not el:
                 raise ValueError(f"Selector not found: {selector}")
@@ -354,6 +399,7 @@ class Crawler:
                 "image": base64.b64encode(full_png).decode(),
                 "elements": elements,
                 "dom_titles": dom_titles,
+                "title_links": title_links,
                 "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
@@ -382,7 +428,13 @@ class Crawler:
             await page.wait_for_load_state("networkidle", timeout=15000)
             current_url = page.url
 
-            dom_titles = await _get_titles(page, element_selector)
+            try:
+                dom_items = await page.evaluate(_DOM_ITEMS_JS, element_selector)
+            except Exception as e:
+                logger.warning(f"_dom_items failed [{element_selector}]: {e}")
+                dom_items = {"titles": [], "links": []}
+            dom_titles = dom_items.get("titles", [])
+            title_links = dom_items.get("links", [])
             el = await page.query_selector(element_selector)
             if not el:
                 raise ValueError(f"Element selector not found after navigation: {element_selector}")
@@ -397,6 +449,7 @@ class Crawler:
                 "elements": elements,
                 "current_url": current_url,
                 "dom_titles": dom_titles,
+                "title_links": title_links,
                 "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
@@ -430,6 +483,115 @@ class Crawler:
             }
         except Exception as e:
             logger.error(f"navigate_and_get_element_map failed for {url}: {e}")
+            raise
+        finally:
+            await ctx.close()
+
+    async def get_detail_texts_by_click(
+        self,
+        url: str,
+        selector: str,
+        titles: list[str],
+    ) -> dict[str, dict]:
+        """javascript: 링크 등 href 추출 불가 시, 실제 클릭으로 상세 본문을 수집한다.
+        Returns: {title: {"text": str, "url": str | None}}
+        """
+        if not titles:
+            return {}
+        browser = await self._ensure_browser()
+        ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
+        results: dict[str, str] = {}
+        try:
+            page = await ctx.new_page()
+            page.on("dialog", lambda d: d.accept())  # alert/confirm 자동 닫기
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            list_url = page.url
+
+            for title in titles:
+                try:
+                    a_handle = await page.evaluate_handle(
+                        r"""([sel, t]) => {
+                            const c = document.querySelector(sel);
+                            if (!c) return null;
+                            const norm = s => s.normalize('NFC').trim().replace(/\s+/g, ' ');
+                            for (const a of c.querySelectorAll('a')) {
+                                const txt = norm(a.innerText || a.textContent || '');
+                                if (txt === t || norm(txt) === norm(t)) return a;
+                            }
+                            return null;
+                        }""",
+                        [selector, title],
+                    )
+                    el = a_handle.as_element()
+                    if not el:
+                        logger.warning(f"link not found for [{title[:40]}]")
+                        continue
+
+                    async with page.expect_navigation(wait_until="networkidle", timeout=15000):
+                        await el.click()
+
+                    if page.url == list_url:
+                        logger.warning(f"no navigation after click [{title[:40]}]")
+                        continue
+
+                    # 상세 본문 추출
+                    text = ""
+                    for sel in [
+                        "article", ".view-content", ".view_content", ".board-view",
+                        ".board_view", ".post-content", ".detail-content",
+                        ".bbs-view", '[class*="view"]', "main", "#content",
+                    ]:
+                        try:
+                            el2 = await page.query_selector(sel)
+                            if el2:
+                                t = (await el2.inner_text()).strip()
+                                if len(t) > 100:
+                                    text = t[:4000]
+                                    break
+                        except Exception:
+                            continue
+                    if not text:
+                        text = (await page.inner_text("body"))[:4000]
+                    results[title] = {"text": text, "url": page.url}
+                    logger.info(f"click-detail fetched [{title[:40]}] ({len(text)} chars) url={page.url}")
+
+                except Exception as e:
+                    logger.warning(f"click-nav failed [{title[:40]}]: {e}")
+                finally:
+                    if page.url != list_url:
+                        try:
+                            await page.goto(list_url, wait_until="networkidle", timeout=20000)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"get_detail_texts_by_click failed for {url}: {e}")
+        finally:
+            await ctx.close()
+        return results
+
+    async def get_detail_text(self, url: str) -> str:
+        """상세 페이지 본문 텍스트 추출."""
+        browser = await self._ensure_browser()
+        ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
+        try:
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            for sel in [
+                'article', '.view-content', '.view_content', '.board-view',
+                '.board_view', '.post-content', '.detail-content',
+                '.bbs-view', '[class*="view"]', 'main', '#content',
+            ]:
+                try:
+                    el = await page.query_selector(sel)
+                    if el:
+                        text = (await el.inner_text()).strip()
+                        if len(text) > 100:
+                            return text[:4000]
+                except Exception:
+                    continue
+            return (await page.inner_text('body'))[:4000]
+        except Exception as e:
+            logger.error(f"get_detail_text failed for {url}: {e}")
             raise
         finally:
             await ctx.close()

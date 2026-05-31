@@ -170,9 +170,13 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
 
         if css_selector:
             try:
-                el_shot = await crawler.screenshot_element(url, css_selector)
-                items = await ai_client.extract_titles(base64.b64encode(el_shot).decode())
-                titles = [item["title"] for item in items]
+                page_info = await crawler.get_page_content(url, selector=css_selector)
+                dom_titles = page_info.get("dom_titles", [])
+                if dom_titles:
+                    titles = dom_titles
+                else:
+                    raw = await ai_client.extract_titles_from_text(page_info["element_text"])
+                    titles = [i["title"] for i in raw]
             except Exception as e:
                 logger.warning(f"title extraction failed for watch {uuid}: {e}")
 
