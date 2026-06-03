@@ -97,11 +97,23 @@ export async function analyzeRegion(
   region: { x1: number; y1: number; x2: number; y2: number; page_height: number; viewport_width: number },
   elements: { selector: string; bbox: { x: number; y: number; w: number; h: number }; text: string }[]
 ): Promise<{ css_selector: string | null; next_page_selector: string | null; next_page_image: string | null; titles: string[]; error: string }> {
-  const res = await fetch(`/api/watches/${uuid}/analyze-region`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...region, elements }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 120_000)
+  try {
+    const res = await fetch(`/api/watches/${uuid}/analyze-region`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...region, elements }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('분석 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.')
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }

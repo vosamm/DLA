@@ -146,6 +146,20 @@ _DOM_ITEMS_JS = r"""
         return null;
     }
 
+    function jsHint(row) {
+        // onclick 우선 (fn_view('123') 같은 패턴을 AI가 파싱하기 쉬움)
+        for (const el of [row, ...Array.from(row.querySelectorAll('[onclick]'))]) {
+            const oc = el.getAttribute && el.getAttribute('onclick');
+            if (oc && oc.trim().length > 3) return oc.trim();
+        }
+        // onclick 없으면 javascript: href
+        for (const a of row.querySelectorAll('a[href^="javascript:"]')) {
+            const t = (a.innerText || '').trim();
+            if (!isNav(t)) return a.href;
+        }
+        return null;
+    }
+
     const ROW_SEL = 'tr, li, [role="listitem"], [role="row"], article';
     const CARD_SEL = '[class*="item"], [class*="card"], [class*="post"], [class*="list-el"]';
 
@@ -165,6 +179,7 @@ _DOM_ITEMS_JS = r"""
 
     const titles = [];
     const links = [];
+    const js_hints = [];
     const seen = new Set();
 
     for (const item of items) {
@@ -173,10 +188,15 @@ _DOM_ITEMS_JS = r"""
         seen.add(t);
         titles.push(t);
         const href = bestHref(item);
-        if (href) links.push({title: t, href});
+        if (href) {
+            links.push({title: t, href});
+        } else {
+            const js = jsHint(item);
+            if (js) js_hints.push({title: t, js_attr: js});
+        }
     }
 
-    return {titles, links};
+    return {titles, links, js_hints};
 }
 """
 
@@ -236,7 +256,7 @@ _NEXT_SEQ_JS = r"""
             if (!isNaN(currentNum)) {
                 const areaSel = getSelector(paginationArea);
                 for (const el of paginationArea.querySelectorAll('a, button')) {
-                    if (parseInt(el.textContent.trim()) === currentNum + 1) {
+                    if (parseInt(el.textContent.trim()) === currentNum + 1 && !el.disabled) {
                         return { nextSel: getSelector(el), areaSel };
                     }
                 }
@@ -247,7 +267,7 @@ _NEXT_SEQ_JS = r"""
     const NEXT_RE = /^(다음|next|[›»]|>{1,2})$/i;
     for (const el of document.querySelectorAll('a[href], button')) {
         const t = (el.innerText || el.textContent || '').trim();
-        if (NEXT_RE.test(t)) return { nextSel: getSelector(el), areaSel: getSelector(el) };
+        if (NEXT_RE.test(t) && !el.disabled) return { nextSel: getSelector(el), areaSel: getSelector(el) };
     }
 
     const curPage = parseInt(new URLSearchParams(window.location.search).get('page') || '1');
@@ -259,6 +279,27 @@ _NEXT_SEQ_JS = r"""
 }
 """
 
+
+
+_DETAIL_SELECTORS = [
+    "article", ".view-content", ".view_content", ".board-view",
+    ".board_view", ".post-content", ".detail-content",
+    ".bbs-view", '[class*="view"]', "main", "#content",
+]
+
+
+async def _extract_detail_text(page: Page) -> str:
+    """페이지에서 상세 본문 텍스트를 추출한다."""
+    for sel in _DETAIL_SELECTORS:
+        try:
+            el = await page.query_selector(sel)
+            if el:
+                t = (await el.inner_text()).strip()
+                if len(t) > 100:
+                    return t[:4000]
+        except Exception:
+            continue
+    return (await page.inner_text("body"))[:4000]
 
 
 async def _crop_roi(page: Page, roi: dict) -> bytes:
@@ -298,22 +339,11 @@ class Crawler:
 
         return self._browser
 
-    async def screenshot_roi(self, url: str, roi: dict) -> bytes:
-        """ROI 영역(정규화 좌표 0~1)만 크롭한 스크린샷 반환."""
-        browser = await self._ensure_browser()
-        ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
-        try:
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            return await _crop_roi(page, roi)
-        except Exception as e:
-            logger.error(f"screenshot_roi failed for {url}: {e}")
-            raise
-        finally:
-            await ctx.close()
-
-    async def screenshot_roi_with_next_seq(self, url: str, roi: dict) -> tuple[bytes, str | None, str | None]:
-        """ROI 크롭 스크린샷, 다음 버튼 selector, 페이지네이션 컨테이너 selector를 단일 세션으로 반환."""
+    async def screenshot_roi_with_next_seq(
+        self, url: str, roi: dict
+    ) -> tuple[bytes, str | None, str | None, bytes | None]:
+        """ROI 크롭 스크린샷, 다음 버튼 selector, 페이지네이션 컨테이너 selector,
+        페이지네이션 영역 스크린샷(있을 경우)을 단일 세션으로 반환."""
         browser = await self._ensure_browser()
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
@@ -323,7 +353,17 @@ class Crawler:
             _next_seq = await page.evaluate(_NEXT_SEQ_JS)
             next_sel = _next_seq["nextSel"] if _next_seq else None
             area_sel = _next_seq["areaSel"] if _next_seq else None
-            return image, next_sel, area_sel
+
+            pag_image: bytes | None = None
+            if area_sel:
+                try:
+                    pag_el = await page.query_selector(area_sel)
+                    if pag_el:
+                        pag_image = await pag_el.screenshot(type="png")
+                except Exception as e:
+                    logger.warning(f"pagination screenshot failed [{area_sel}]: {e}")
+
+            return image, next_sel, area_sel, pag_image
         except Exception as e:
             logger.error(f"screenshot_roi_with_next_seq failed for {url}: {e}")
             raise
@@ -352,23 +392,6 @@ class Crawler:
         finally:
             await ctx.close()
 
-    async def screenshot_element(self, url: str, selector: str) -> bytes:
-        """CSS 셀렉터로 특정 요소만 스크린샷해 반환."""
-        browser = await self._ensure_browser()
-        ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
-        try:
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            el = await page.query_selector(selector)
-            if not el:
-                raise ValueError(f"Selector not found: {selector}")
-            return await el.screenshot(type="png")
-        except Exception as e:
-            logger.error(f"screenshot_element failed for {url} [{selector}]: {e}")
-            raise
-        finally:
-            await ctx.close()
-
     async def get_page_content(
         self, url: str, *, selector: str
     ) -> dict:
@@ -383,9 +406,10 @@ class Crawler:
                 dom_items = await page.evaluate(_DOM_ITEMS_JS, selector)
             except Exception as e:
                 logger.warning(f"_dom_items failed [{selector}]: {e}")
-                dom_items = {"titles": [], "links": []}
+                dom_items = {"titles": [], "links": [], "js_hints": []}
             dom_titles = dom_items.get("titles", [])
             title_links = dom_items.get("links", [])
+            js_hints = dom_items.get("js_hints", [])
             el = await page.query_selector(selector)
             if not el:
                 raise ValueError(f"Selector not found: {selector}")
@@ -400,6 +424,7 @@ class Crawler:
                 "elements": elements,
                 "dom_titles": dom_titles,
                 "title_links": title_links,
+                "js_hints": js_hints,
                 "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
@@ -432,9 +457,10 @@ class Crawler:
                 dom_items = await page.evaluate(_DOM_ITEMS_JS, element_selector)
             except Exception as e:
                 logger.warning(f"_dom_items failed [{element_selector}]: {e}")
-                dom_items = {"titles": [], "links": []}
+                dom_items = {"titles": [], "links": [], "js_hints": []}
             dom_titles = dom_items.get("titles", [])
             title_links = dom_items.get("links", [])
+            js_hints = dom_items.get("js_hints", [])
             el = await page.query_selector(element_selector)
             if not el:
                 raise ValueError(f"Element selector not found after navigation: {element_selector}")
@@ -450,6 +476,7 @@ class Crawler:
                 "current_url": current_url,
                 "dom_titles": dom_titles,
                 "title_links": title_links,
+                "js_hints": js_hints,
                 "next_seq_selector": _next_seq["nextSel"] if _next_seq else None,
             }
         except Exception as e:
@@ -508,15 +535,23 @@ class Crawler:
             list_url = page.url
 
             for title in titles:
+                new_pages: list = []  # finally 블록에서 항상 참조되므로 루프 시작 시 초기화
                 try:
                     a_handle = await page.evaluate_handle(
                         r"""([sel, t]) => {
                             const c = document.querySelector(sel);
                             if (!c) return null;
                             const norm = s => s.normalize('NFC').trim().replace(/\s+/g, ' ');
+                            const clean = s => norm(s).replace(/[\[\]<>()\{\}「」【】『』·,\.…]/g, '').replace(/\s+/g, ' ').trim();
+                            const nt = norm(t);
+                            const ntc = clean(t);
                             for (const a of c.querySelectorAll('a')) {
                                 const txt = norm(a.innerText || a.textContent || '');
-                                if (txt === t || norm(txt) === norm(t)) return a;
+                                const txtc = clean(txt);
+                                if (txt === nt
+                                    || txt.includes(nt)
+                                    || txtc.includes(ntc)
+                                    || (nt.includes(txt) && txt.length >= nt.length * 0.7)) return a;
                             }
                             return null;
                         }""",
@@ -527,37 +562,73 @@ class Crawler:
                         logger.warning(f"link not found for [{title[:40]}]")
                         continue
 
-                    async with page.expect_navigation(wait_until="networkidle", timeout=15000):
-                        await el.click()
+                    # 새 탭/팝업 감지 (javascript:window.open() 등 대응)
 
-                    if page.url == list_url:
-                        logger.warning(f"no navigation after click [{title[:40]}]")
+                    def _on_page(p):
+                        new_pages.append(p)
+
+                    ctx.on("page", _on_page)
+                    try:
+                        try:
+                            async with page.expect_navigation(wait_until="networkidle", timeout=15000):
+                                await el.click()
+                        except Exception:
+                            # ERR_ABORTED / frame detached 등 — URL이 바뀌었으면 이동 성공으로 처리
+                            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    finally:
+                        ctx.remove_listener("page", _on_page)
+
+                    # 새 탭이 열렸으면 그 탭에서 추출
+                    if new_pages:
+                        new_page = new_pages[0]
+                        try:
+                            await new_page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            pass
+                        text = await _extract_detail_text(new_page)
+                        detail_url = new_page.url
+                        await new_page.close()
+                        if text:
+                            results[title] = {"text": text, "url": detail_url}
+                            logger.info(f"popup-detail fetched [{title[:40]}] ({len(text)} chars) url={detail_url}")
                         continue
 
-                    # 상세 본문 추출
-                    text = ""
-                    for sel in [
-                        "article", ".view-content", ".view_content", ".board-view",
-                        ".board_view", ".post-content", ".detail-content",
-                        ".bbs-view", '[class*="view"]', "main", "#content",
-                    ]:
+                    if page.url == list_url:
+                        # AJAX/SPA — 콘텐츠 로드 대기 후 스크린샷을 AI에 넘긴다
                         try:
-                            el2 = await page.query_selector(sel)
-                            if el2:
-                                t = (await el2.inner_text()).strip()
-                                if len(t) > 100:
-                                    text = t[:4000]
-                                    break
+                            try:
+                                await page.wait_for_load_state("networkidle", timeout=5000)
+                            except Exception:
+                                await page.wait_for_timeout(3000)
+                            screenshot = await page.screenshot(type="png", full_page=True)
+                            results[title] = {
+                                "screenshot_b64": base64.b64encode(screenshot).decode(),
+                                "url": list_url,
+                            }
+                            logger.info(f"ajax-screenshot captured [{title[:40]}]")
+                        except Exception as e:
+                            logger.warning(f"ajax screenshot failed [{title[:40]}]: {e}")
+                        # AJAX가 DOM을 변경했으므로 다음 반복을 위해 목록 페이지 복원
+                        try:
+                            await page.goto(list_url, wait_until="networkidle", timeout=20000)
                         except Exception:
-                            continue
-                    if not text:
-                        text = (await page.inner_text("body"))[:4000]
+                            pass
+                        continue
+
+                    text = await _extract_detail_text(page)
                     results[title] = {"text": text, "url": page.url}
                     logger.info(f"click-detail fetched [{title[:40]}] ({len(text)} chars) url={page.url}")
 
                 except Exception as e:
                     logger.warning(f"click-nav failed [{title[:40]}]: {e}")
                 finally:
+                    # 새로 열린 탭 정리
+                    for p in new_pages:
+                        try:
+                            if not p.is_closed():
+                                await p.close()
+                        except Exception:
+                            pass
                     if page.url != list_url:
                         try:
                             await page.goto(list_url, wait_until="networkidle", timeout=20000)
@@ -575,21 +646,8 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            for sel in [
-                'article', '.view-content', '.view_content', '.board-view',
-                '.board_view', '.post-content', '.detail-content',
-                '.bbs-view', '[class*="view"]', 'main', '#content',
-            ]:
-                try:
-                    el = await page.query_selector(sel)
-                    if el:
-                        text = (await el.inner_text()).strip()
-                        if len(text) > 100:
-                            return text[:4000]
-                except Exception:
-                    continue
-            return (await page.inner_text('body'))[:4000]
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            return await _extract_detail_text(page)
         except Exception as e:
             logger.error(f"get_detail_text failed for {url}: {e}")
             raise

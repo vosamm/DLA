@@ -35,10 +35,6 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function typeLabel(type: 'content' | 'market'): string {
-  return type === 'content' ? '공지' : '마켓'
-}
-
 function scopeWatchUuid(scope: string): string | null {
   return scope.startsWith('watch:') ? scope.slice(6) : null
 }
@@ -56,17 +52,13 @@ function useEscapeKey(onClose: () => void, enabled = true) {
 
 // ─── SiteChip ────────────────────────────────────────────────────────────────
 
-function SiteChip({ type, name, time }: {
-  type: 'content' | 'market'
+function SiteChip({ name, time }: {
   name: string
   time: number
 }) {
   return (
     <>
-      <span className="site-chip">
-        <span className={`type-dot ${type}`} />
-        {name}
-      </span>
+      <span className="site-chip">{name}</span>
       <span className="dot-sep" />
       <span className="alert-time">{fmtTime(time)}</span>
     </>
@@ -133,12 +125,11 @@ function Header({ unreadCount, totalAlerts, totalWatches, lastUpdated, onManage 
 
 // ─── NavItem ──────────────────────────────────────────────────────────────────
 
-function NavItem({ id, label, icon, count, typeDot, activeScope, onScope }: {
+function NavItem({ id, label, icon, count, activeScope, onScope }: {
   id: string
   label: string
   icon?: React.ReactNode
   count?: number
-  typeDot?: 'content' | 'market'
   activeScope: string
   onScope: (s: string) => void
 }) {
@@ -148,10 +139,7 @@ function NavItem({ id, label, icon, count, typeDot, activeScope, onScope }: {
       className={`nav-item${id === activeScope ? ' active' : ''}${hasUnread ? ' has-unread' : ''}`}
       onClick={() => onScope(id)}
     >
-      {typeDot
-        ? <span className={`nav-type-dot ${typeDot}`} />
-        : icon && <span className="nav-icon">{icon}</span>
-      }
+      {icon && <span className="nav-icon">{icon}</span>}
       <span className="nav-label">{label}</span>
       {count !== undefined && <span className="nav-count">{count}</span>}
     </div>
@@ -181,8 +169,6 @@ function Sidebar({ scope, watches, alerts, onScope }: {
     [alerts]
   )
 
-  const contentWatches = watches.filter(w => w.type === 'content')
-  const marketWatches = watches.filter(w => w.type === 'market')
   const navProps = { activeScope: scope, onScope }
 
   return (
@@ -190,32 +176,15 @@ function Sidebar({ scope, watches, alerts, onScope }: {
       <NavItem id="all" label="전체 받은 알림" icon={<Icons.Inbox />} count={totalUnread} {...navProps} />
       <NavItem id="unread" label="읽지 않음" icon={<Icons.Bell />} count={totalUnread} {...navProps} />
 
-      {contentWatches.length > 0 && (
+      {watches.length > 0 && (
         <>
-          <div className="sidebar-section">공지 · 뉴스</div>
-          {contentWatches.map(w => (
+          <div className="sidebar-section">모니터</div>
+          {watches.map(w => (
             <NavItem
               key={w.uuid}
               id={`watch:${w.uuid}`}
               label={w.title || hostOf(w.url)}
               count={unreadByWatch[w.uuid] ?? 0}
-              typeDot="content"
-              {...navProps}
-            />
-          ))}
-        </>
-      )}
-
-      {marketWatches.length > 0 && (
-        <>
-          <div className="sidebar-section">거래 · 상품</div>
-          {marketWatches.map(w => (
-            <NavItem
-              key={w.uuid}
-              id={`watch:${w.uuid}`}
-              label={w.title || hostOf(w.url)}
-              count={unreadByWatch[w.uuid] ?? 0}
-              typeDot="market"
               {...navProps}
             />
           ))}
@@ -247,14 +216,14 @@ function AlertRow({ alert, watchMap, onOpen, onDismiss, onMarkRead }: {
 
   return (
     <div
-      className={`alert-row is-${alert.type} ${alert.read ? 'is-read' : 'is-unread'}`}
+      className={`alert-row ${alert.read ? 'is-read' : 'is-unread'}`}
       onClick={handleClick}
     >
       <div className="alert-dot" />
       <div className="alert-stripe" />
       <div className="alert-body">
         <div className="alert-meta-row">
-          <SiteChip type={alert.type} name={siteName} time={alert.changed_at} />
+          <SiteChip name={siteName} time={alert.changed_at} />
         </div>
         <div className="alert-title">{alert.analysis.title || siteName}</div>
         {alert.analysis.summary && (
@@ -319,15 +288,11 @@ function Inbox({ alerts, watchMap, scope, onOpen, onDismiss, onMarkRead, onMarkA
   const title = scope === 'unread' ? '읽지 않음'
     : uuid ? (watch?.title || (watch ? hostOf(watch.url) : '알림'))
     : '전체 받은 알림'
-  const scopeBadge = uuid ? typeLabel(watch?.type ?? 'content') : null
 
   return (
     <>
       <div className="main-header">
-        <div className="main-title">
-          {title}
-          {scopeBadge && <span className="scope-badge">{scopeBadge}</span>}
-        </div>
+        <div className="main-title">{title}</div>
         {(unreadCount > 0 || readCount > 0) && (
           <div className="main-actions">
             {unreadCount > 0 && (
@@ -395,7 +360,7 @@ function DetailDrawer({ alert, watchMap, onClose, onDismiss }: {
           <>
             <div className="detail-header">
               <div className="detail-meta">
-                <SiteChip type={alert.type} name={siteName} time={alert.changed_at} />
+                <SiteChip name={siteName} time={alert.changed_at} />
               </div>
               <div className="detail-header-actions">
                 <button className="icon-btn" title="닫기" onClick={onClose}><Icons.X /></button>
@@ -712,7 +677,6 @@ function ManagePanel({ watches, onReload, onToast }: {
             <div className="watch-card" key={w.uuid}>
               <div className="watch-row">
                 <div className="watch-info">
-                  <span className={`watch-type-pill ${w.type}`}>{typeLabel(w.type)}</span>
                   <div className="watch-text">
                     <div className="watch-title">{w.title || hostOf(w.url)}</div>
                     <a className="watch-url" href={w.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
@@ -822,18 +786,6 @@ export function InboxApp() {
     return () => clearInterval(id)
   }, [loadData])
 
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
-      if (e.key === 'r') loadData()
-      else if (e.key === '1') setScope('all')
-      else if (e.key === '2') setScope('unread')
-      else if (e.key === 'g') setScope('manage')
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [loadData])
 
   useEffect(() => {
     const timers = toastTimers.current

@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 def _parse_alert_row(r) -> dict:
     row = dict(r)
+    row.pop("type", None)
     try:
         row["analysis"] = json.loads(r["analysis"])
     except (json.JSONDecodeError, TypeError):

@@ -31,20 +31,6 @@ FIND_NEXT_PROMPT = """\
 - elements 목록에 있는 selector만 사용
 - 없으면 {"selector": null}"""
 
-ROI_EXTRACT_PROMPT = """\
-이 이미지는 웹페이지 공지사항/게시글 목록 영역의 스크린샷입니다.
-
-각 게시글의 제목만 추출하여 다음 JSON 형식으로 반환하세요:
-{"items": [{"title": "제목 원문", "summary": "날짜·마감·대상 등 핵심 정보 (없으면 빈 문자열)"}]}
-
-규칙:
-- items 배열 길이 = 화면에 보이는 게시글 수 (게시글 1개 → 항목 1개, 초과 금지)
-- 제목 아래 미리보기·설명·요약문은 별도 항목으로 추가하지 말 것 (제목과 같은 게시글의 일부)
-- 작성자명·닉네임·날짜·조회수·포인트·댓글 수 제외
-- title은 클릭 가능한 링크 텍스트 (가장 크고 굵게 표시된 줄)
-- 항목이 없으면 {"items": []} 반환
-- JSON 외 텍스트 출력 금지"""
-
 
 class AIClient:
     def __init__(self):
@@ -77,19 +63,6 @@ class AIClient:
         )
         text = response.choices[0].message.content or ""
         return json.loads(text)
-
-    async def extract_titles(self, image_b64: str) -> list[dict]:
-        """ROI 이미지에서 공지 제목 목록 추출."""
-        try:
-            parsed = await self._call_vision(ROI_EXTRACT_PROMPT, image_b64, timeout=60)
-            items = parsed.get("items", [])
-            return [
-                {"title": i["title"].strip(), "summary": i.get("summary", "").strip()}
-                for i in items if i.get("title", "").strip()
-            ]
-        except Exception as e:
-            logger.error(f"extract_titles failed: {type(e).__name__}: {e}")
-            return []
 
     async def extract_titles_from_text(self, text: str) -> list[dict]:
         """요소 텍스트에서 공지 제목 목록 추출 (이미지 없이 텍스트만 사용)."""
@@ -217,6 +190,69 @@ class AIClient:
             }
         except Exception as e:
             logger.error(f"find_href_for_titles failed: {e}")
+            return {}
+
+
+    async def extract_detail_from_screenshot(self, image_b64: str, title: str) -> str:
+        """클릭 후 URL이 바뀌지 않는 AJAX/SPA 페이지에서 상세 내용을 스크린샷으로 추출한다."""
+        prompt = (
+            f"이 스크린샷은 공지 목록에서 '{title}' 항목을 클릭한 직후 화면입니다.\n"
+            "화면에 해당 공지의 상세 본문이 로드되어 있으면 그 내용을 텍스트로 추출하세요.\n"
+            "여전히 목록만 보이거나 상세 내용이 없으면 content를 빈 문자열로 반환하세요.\n\n"
+            '형식: {"content": "추출된 본문 텍스트 (없으면 빈 문자열)"}'
+        )
+        try:
+            parsed = await self._call_vision(prompt, image_b64, timeout=30)
+            return (parsed.get("content") or "").strip()
+        except Exception as e:
+            logger.error(f"extract_detail_from_screenshot failed: {e}")
+            return ""
+
+    async def infer_hrefs_from_js(
+        self,
+        page_url: str,
+        js_hints: list[dict],
+    ) -> dict[str, str]:
+        """javascript: 표현식과 목록 페이지 URL로 실제 detail URL을 추론한다.
+
+        Args:
+            page_url: 현재 목록 페이지 URL (URL 패턴 추론 힌트로 사용)
+            js_hints: [{"title": "...", "js_attr": "fn_view('123')"}]
+
+        Returns:
+            {title: inferred_href} — 추론 실패 항목은 포함하지 않음
+        """
+        if not js_hints:
+            return {}
+        prompt = (
+            f"목록 페이지 URL: {page_url}\n\n"
+            "아래 항목들은 공지 목록의 링크가 javascript: 표현식이라 실제 URL을 모릅니다.\n"
+            "각 항목의 js_attr(onclick 또는 javascript: href)과 목록 URL 패턴을 보고 "
+            "실제 상세 페이지 URL을 추론하세요.\n\n"
+            "추론 방법:\n"
+            "- list.do → view.do, /list → /view, /board/list → /board/view 같은 경로 패턴\n"
+            "- fn_view·goView·viewDetail 등의 함수 인자는 보통 seq/nttId/id에 해당\n"
+            "- 목록 URL의 쿼리 파라미터(bbsId 등)는 상세 URL에도 공통으로 사용되는 경우 多\n"
+            "- 확신할 수 없으면 null\n\n"
+            f"항목:\n{json.dumps(js_hints, ensure_ascii=False)}\n\n"
+            '형식: {"matches": [{"title": "...", "href": "추론된 절대 URL 또는 null"}]}'
+        )
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                timeout=20,
+            )
+            parsed = json.loads(response.choices[0].message.content or "{}")
+            return {
+                m["title"]: m["href"]
+                for m in parsed.get("matches", [])
+                if m.get("title") and m.get("href")
+            }
+        except Exception as e:
+            logger.error(f"infer_hrefs_from_js failed: {e}")
             return {}
 
 

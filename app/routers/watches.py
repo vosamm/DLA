@@ -19,7 +19,6 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 class WatchCreate(BaseModel):
     url: str
     title: str = ""
-    type: str = "content"
 
 
 class WatchUpdate(BaseModel):
@@ -62,7 +61,7 @@ async def list_watches():
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT uuid, url, title, type,
+            SELECT uuid, url, title,
                    css_selector, next_page_selector, last_crawled, crawl_interval_hours
             FROM watches
             ORDER BY last_crawled DESC
@@ -79,15 +78,15 @@ async def create_watch(body: WatchCreate):
             conn.execute(
                 """
                 INSERT INTO watches
-                    (uuid, url, title, type, crawl_interval_hours, last_crawled)
-                VALUES (?, ?, ?, ?, 12, 0)
+                    (uuid, url, title, crawl_interval_hours, last_crawled)
+                VALUES (?, ?, ?, 12, 0)
                 """,
-                (new_uuid, body.url, body.title or body.url, body.type),
+                (new_uuid, body.url, body.title or body.url),
             )
     except Exception as e:
         logger.error(f"create_watch failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-    return {"uuid": new_uuid, "url": body.url, "title": body.title}
+    return {"uuid": new_uuid, "url": body.url, "title": body.title or body.url}
 
 
 @router.put("/{uuid}")
@@ -159,14 +158,16 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
     error_msg = ""
 
     try:
-        screenshot, next_seq_selector, pagination_area_selector = await crawler.screenshot_roi_with_next_seq(url, roi)
+        screenshot, next_seq_selector, pagination_area_selector, pag_shot = \
+            await crawler.screenshot_roi_with_next_seq(url, roi)
         image_b64 = base64.b64encode(screenshot).decode()
 
         result = await ai_client.identify_selectors(image_b64, body.elements)
         css_selector = result.get("content_selector")
         next_page_selector = result.get("next_page_selector") or next_seq_selector
 
-        next_page_image: str | None = None
+        # 페이지네이션 이미지: 세션 1에서 이미 찍어둔 것 사용
+        next_page_image: str | None = base64.b64encode(pag_shot).decode() if pag_shot else None
 
         if css_selector:
             try:
@@ -179,14 +180,6 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
                     titles = [i["title"] for i in raw]
             except Exception as e:
                 logger.warning(f"title extraction failed for watch {uuid}: {e}")
-
-            pag_screenshot_sel = pagination_area_selector or next_page_selector
-            if pag_screenshot_sel:
-                try:
-                    pag_shot = await crawler.screenshot_element(url, pag_screenshot_sel)
-                    next_page_image = base64.b64encode(pag_shot).decode()
-                except Exception as e:
-                    logger.warning(f"pagination screenshot failed for watch {uuid}: {e}")
 
             with get_db() as conn:
                 conn.execute(
@@ -221,7 +214,7 @@ async def navigate_element_map(uuid: str, body: NavigateRequest):
 @router.post("/{uuid}/crawl")
 async def trigger_crawl(uuid: str):
     """즉시 크롤을 트리거한다. scheduler의 process_watch를 직접 호출."""
-    from scheduler import process_watch  # 순환 import 방지용 지연 import
+    from scheduler import process_watch, retry_missing_summaries  # 순환 import 방지용 지연 import
 
     with get_db() as conn:
         row = conn.execute(
@@ -233,6 +226,7 @@ async def trigger_crawl(uuid: str):
     watch = dict(row)
     try:
         await process_watch(watch)
+        await retry_missing_summaries(watch)
     except Exception as e:
         logger.error(f"trigger_crawl failed for watch {uuid}: {e}")
         raise HTTPException(status_code=502, detail=str(e))
