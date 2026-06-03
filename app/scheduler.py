@@ -127,6 +127,8 @@ async def _process_watch_inner(watch: dict) -> None:
 
             dom_titles = page_info.get("dom_titles", [])
             if dom_titles:
+                dom_titles = await ai_client.filter_titles(dom_titles, image_b64=page_info.get("image"))
+            if dom_titles:
                 items = [{"title": t, "summary": "", "href": None} for t in dom_titles]
             else:
                 raw = await ai_client.extract_titles_from_text(page_info["element_text"])

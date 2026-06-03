@@ -23,7 +23,7 @@ FIND_NEXT_PROMPT = """\
 이 이미지는 웹페이지 스크린샷이고, elements는 페이지 요소 목록입니다.
 
 "다음 페이지"로 이동하는 버튼이나 링크를 찾아 JSON으로 반환하세요.
-형식: {"selector": "CSS selector"} 또는 {"selector": null}
+JSON 형식으로만 반환: {"selector": "CSS selector"} 또는 {"selector": null}
 
 주의:
 - "다음", ">", "▶", "next", ">>" 같은 다음 페이지 이동 버튼을 찾으세요
@@ -63,6 +63,37 @@ class AIClient:
         )
         text = response.choices[0].message.content or ""
         return json.loads(text)
+
+    async def filter_titles(self, titles: list[str], image_b64: str | None = None) -> list[str]:
+        """DOM에서 추출한 제목 후보 목록에서 태그·카테고리·레이블 등 비제목을 제거한다.
+        image_b64가 주어지면 스크린샷을 함께 보고 시각적으로 판단한다."""
+        if not titles:
+            return []
+        titles_json = json.dumps(titles, ensure_ascii=False)
+        prompt = (
+            "이 스크린샷은 웹페이지 목록 영역입니다.\n"
+            "아래 텍스트 목록은 DOM에서 추출한 후보들입니다. "
+            "스크린샷을 보고 실제로 게시글·토픽의 제목으로 표시된 항목만 남기세요.\n"
+            "태그·카테고리 라벨·날짜·작성자명·조회수·버튼 텍스트는 제거하세요.\n\n"
+            f"후보 목록:\n{titles_json}\n\n"
+            'JSON 형식으로만 반환: {"titles": ["제목1", "제목2", ...]}'
+        )
+        try:
+            if image_b64:
+                parsed = await self._call_vision(prompt, image_b64, timeout=30)
+            else:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    timeout=20,
+                )
+                parsed = json.loads(response.choices[0].message.content or "{}")
+            return [t for t in parsed.get("titles", []) if isinstance(t, str) and t.strip()]
+        except Exception as e:
+            logger.error(f"filter_titles failed: {e}")
+            return titles  # 실패 시 원본 그대로
 
     async def extract_titles_from_text(self, text: str) -> list[dict]:
         """요소 텍스트에서 공지 제목 목록 추출 (이미지 없이 텍스트만 사용)."""
@@ -172,7 +203,7 @@ class AIClient:
             f"링크 목록 (텍스트가 약간 다를 수 있음):\n{links_json}\n\n"
             "각 제목과 가장 의미상 같은 링크의 href를 찾아 반환하세요. "
             "확실하지 않으면 null.\n"
-            '형식: {"matches": [{"title": "원본제목", "href": "url 또는 null"}]}'
+            'JSON 형식으로만 반환: {"matches": [{"title": "원본제목", "href": "url 또는 null"}]}'
         )
         try:
             response = await self.client.chat.completions.create(
@@ -199,7 +230,7 @@ class AIClient:
             f"이 스크린샷은 공지 목록에서 '{title}' 항목을 클릭한 직후 화면입니다.\n"
             "화면에 해당 공지의 상세 본문이 로드되어 있으면 그 내용을 텍스트로 추출하세요.\n"
             "여전히 목록만 보이거나 상세 내용이 없으면 content를 빈 문자열로 반환하세요.\n\n"
-            '형식: {"content": "추출된 본문 텍스트 (없으면 빈 문자열)"}'
+            'JSON 형식으로만 반환: {"content": "추출된 본문 텍스트 (없으면 빈 문자열)"}'
         )
         try:
             parsed = await self._call_vision(prompt, image_b64, timeout=30)
@@ -235,7 +266,7 @@ class AIClient:
             "- 목록 URL의 쿼리 파라미터(bbsId 등)는 상세 URL에도 공통으로 사용되는 경우 多\n"
             "- 확신할 수 없으면 null\n\n"
             f"항목:\n{json.dumps(js_hints, ensure_ascii=False)}\n\n"
-            '형식: {"matches": [{"title": "...", "href": "추론된 절대 URL 또는 null"}]}'
+            'JSON 형식으로만 반환: {"matches": [{"title": "...", "href": "추론된 절대 URL 또는 null"}]}'
         )
         try:
             response = await self.client.chat.completions.create(

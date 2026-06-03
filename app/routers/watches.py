@@ -174,7 +174,7 @@ async def analyze_region(uuid: str, body: AnalyzeRegionRequest):
                 page_info = await crawler.get_page_content(url, selector=css_selector)
                 dom_titles = page_info.get("dom_titles", [])
                 if dom_titles:
-                    titles = dom_titles
+                    titles = await ai_client.filter_titles(dom_titles, image_b64=page_info.get("image"))
                 else:
                     raw = await ai_client.extract_titles_from_text(page_info["element_text"])
                     titles = [i["title"] for i in raw]
