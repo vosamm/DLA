@@ -1,6 +1,6 @@
 /* ──────────────────────────────────────────────────────────────────
-   Notice Ping — Inbox UI
-   Tone: Linear/Vercel 미니멀, 따뜻한 뉴트럴 + violet accent
+   NoticeFeed — Inbox UI
+   Tone: Linear/Vercel 미니멀, 따뜻한 뉴트럴 + UOS blue accent
    ────────────────────────────────────────────────────────────── */
 
 :root {
@@ -18,9 +18,9 @@
   --text-muted:  #6B6B63;
   --text-faint:  #9A9A92;
 
-  --accent:      oklch(0.52 0.16 285);
-  --accent-soft: oklch(0.96 0.02 285);
-  --accent-bg:   oklch(0.985 0.01 285);
+  --accent:      oklch(0.45 0.20 260);
+  --accent-soft: oklch(0.95 0.04 260);
+  --accent-bg:   oklch(0.985 0.015 260);
 
   --success:     oklch(0.55 0.13 155);
   --danger:      oklch(0.55 0.18 25);
@@ -784,7 +784,7 @@ a { color: inherit; text-decoration: none; }
 .vf-el-hover {
   position: absolute;
   border: 2px solid var(--accent);
-  background: oklch(0.52 0.16 285 / 0.15);
+  background: oklch(0.45 0.20 260 / 0.15);
   pointer-events: none;
   transition: left 0.05s, top 0.05s, width 0.05s, height 0.05s;
 }

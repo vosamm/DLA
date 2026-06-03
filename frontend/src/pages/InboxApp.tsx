@@ -91,33 +91,22 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
-function Header({ unreadCount, totalAlerts, totalWatches, lastUpdated, onManage }: {
-  unreadCount: number
-  totalAlerts: number
-  totalWatches: number
+function Header({ lastUpdated }: {
   lastUpdated: Date | null
-  onManage: () => void
 }) {
   return (
     <header className="header">
       <div className="brand">
         <BrandMark />
-        Notice Ping
+        NoticeFeed
       </div>
-      <div className="header-stats">
-        <span><span className="stat-num">{unreadCount}</span>읽지 않음</span>
-        <div className="sep" />
-        <span><span className="stat-num">{totalAlerts}</span>알림</span>
-        <div className="sep" />
-        <span><span className="stat-num">{totalWatches}</span>모니터</span>
-      </div>
+
       <div className="header-actions">
         {lastUpdated && (
           <span className="last-updated">
             {lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
-        <button className="icon-btn" title="모니터 관리" onClick={onManage}><Icons.Settings /></button>
       </div>
     </header>
   )
@@ -748,8 +737,6 @@ export function InboxApp() {
   const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const watchMap = useMemo(() => new Map(watches.map(w => [w.uuid, w])), [watches])
-  const unreadCount = useMemo(() => alerts.filter(a => !a.read && !a.dismissed).length, [alerts])
-  const totalAlerts = useMemo(() => alerts.filter(a => !a.dismissed).length, [alerts])
 
   const showToast = useCallback((msg: string, type?: 'error') => {
     const id = crypto.randomUUID()
@@ -839,11 +826,7 @@ export function InboxApp() {
   return (
     <div className="app">
       <Header
-        unreadCount={unreadCount}
-        totalAlerts={totalAlerts}
-        totalWatches={watches.length}
         lastUpdated={lastUpdated}
-        onManage={() => setScope('manage')}
       />
       <Sidebar scope={scope} watches={watches} alerts={alerts} onScope={setScope} />
       <main className="main">

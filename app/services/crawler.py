@@ -348,7 +348,7 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
             image = await _crop_roi(page, roi)
             _next_seq = await page.evaluate(_NEXT_SEQ_JS)
             next_sel = _next_seq["nextSel"] if _next_seq else None
@@ -376,7 +376,8 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
+            await page.wait_for_timeout(1500)
             page_height: float = await page.evaluate("document.documentElement.scrollHeight")
             png = await page.screenshot(type="png", full_page=True)
             elements = await page.evaluate(_ELEMENT_MAP_JS)
@@ -400,7 +401,7 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
 
             try:
                 dom_items = await page.evaluate(_DOM_ITEMS_JS, selector)
@@ -445,7 +446,7 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
             btn = await page.query_selector(next_selector)
             if not btn:
                 raise ValueError(f"Next selector not found: {next_selector}")
@@ -491,7 +492,7 @@ class Crawler:
         ctx = await browser.new_context(viewport={"width": _VIEWPORT_W, "height": _VIEWPORT_H})
         try:
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
             btn = await page.query_selector(next_selector)
             if not btn:
                 raise ValueError(f"Next selector not found: {next_selector}")
@@ -531,7 +532,7 @@ class Crawler:
         try:
             page = await ctx.new_page()
             page.on("dialog", lambda d: d.accept())  # alert/confirm 자동 닫기
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="load", timeout=30000)
             list_url = page.url
 
             for title in titles:
