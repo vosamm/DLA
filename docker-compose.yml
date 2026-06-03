@@ -1,11 +1,11 @@
-name: noticeping
+name: noticefeed
 
 services:
   app:
     build:
       context: .
       dockerfile: app/Dockerfile
-    container_name: noticeping-app
+    container_name: noticefeed-app
     ports:
       - "8000:8000"
     environment:
@@ -13,7 +13,7 @@ services:
       - AI_API_BASE=${AI_API_BASE:-https://factchat-cloud.mindlogic.ai/v1/gateway}
       - AI_MODEL=${AI_MODEL:-gpt-5.4-mini}
       - POLL_INTERVAL=${POLL_INTERVAL:-60}
-      - DATABASE_PATH=/app/data/noticeping.db
+      - DATABASE_PATH=/app/data/noticefeed.db
     volumes:
       - ./data:/app/data
     restart: unless-stopped
