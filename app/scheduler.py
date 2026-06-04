@@ -17,7 +17,7 @@ from services.ai_client import ai_client
 logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 5
-_MAX_KNOWN_TITLES = 200
+_MAX_KNOWN_TITLES = 1000
 _WATCH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
@@ -104,6 +104,23 @@ async def _process_watch_inner(watch: dict) -> None:
     known_titles_raw = watch.get("known_titles")
     known_titles_list: list[str] = json.loads(known_titles_raw or "[]")
     known_titles_set: set[str] = {_normalize(t) for t in known_titles_list}
+
+    # alerts DB에 이미 저장된 제목도 known으로 처리 — known_titles 누락·한계 보완
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT analysis FROM alerts WHERE watch_uuid = ? ORDER BY changed_at DESC LIMIT 500",
+                (uuid,),
+            ).fetchall()
+        for r in rows:
+            try:
+                title = json.loads(r["analysis"]).get("title", "")
+                if title:
+                    known_titles_set.add(_normalize(title))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"[{uuid}] failed to load alerted titles: {e}")
 
     now = int(time.time())
     db_update_crawled(uuid, now)
